@@ -4,7 +4,7 @@
   --paper: #f5f3ed;
   --surface: #fffefa;
   --ink: #222a27;
-  --muted: #6f7771;
+  --muted: #596058; /* darkened from #6f7771: original failed WCAG AA (4.15:1) on --paper at normal text sizes */
   --line: #dedfd6;
   --green: #345d49;
   --green-dark: #234433;
@@ -114,6 +114,39 @@ h1 em { color: var(--green); font-family: 'Playfair Display', serif; font-weight
 .page-footer span { color: #8b9389; font-size: 8px; white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
+.subsection-heading { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.2px; }
+
+.field { display: grid; gap: 5px; font-size: 11px; color: var(--muted); }
+.field input { min-height: 44px; padding: 0 11px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 13px; width: 100%; }
+.field-row { display: grid; gap: 12px; }
+.field-row-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field-row-4 { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+
+.chip-button { margin: 0 6px 6px 0; padding: 5px 9px; border: 1px solid #dfdfd5; background: #f8f7f2; color: #55594f; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .03em; cursor: pointer; }
+.chip-button:hover { background: var(--green-wash); border-color: #b9c7b6; color: var(--green-dark); }
+
+.offer-list, .day-list, .budget-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.offer-card, .day-card { padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); }
+.offer-top, .day-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.offer-title { font-size: 13px; font-weight: 700; }
+.offer-kind { margin-inline-start: 8px; color: var(--muted); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.offer-price, .day-total { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.offer-summary { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.day-date { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .03em; }
+.day-offers { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+.day-offers li { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11px; }
+.day-empty { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+.budget-row { display: flex; justify-content: space-between; font-size: 12px; padding: 7px 0; border-bottom: 1px dashed #ecece5; }
+.budget-row:last-child { border-bottom: 0; }
+
+.payment-panel { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.payment-note { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.approve-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; padding: 10px 14px; border: 1px solid var(--green); color: var(--green); font-size: 12px; font-weight: 600; text-decoration: none; }
+.approve-link:hover { background: var(--green-wash); }
+.secondary-button { min-height: 44px; padding: 0 16px; border: 1px solid var(--ink); background: transparent; color: var(--ink); font-size: 12px; font-weight: 600; cursor: pointer; }
+.secondary-button:hover { background: var(--ink); color: white; }
+.secondary-button:disabled { opacity: .6; cursor: default; }
+
 @media (max-width: 1240px) {
   .content, .notice { margin-inline: 32px; }
 }
@@ -128,6 +161,9 @@ h1 em { color: var(--green); font-family: 'Playfair Display', serif; font-weight
   .decision-grid { grid-template-columns: 1fr; gap: 14px; }
   .preference-panel, .comparison-panel { padding: 19px; }
   .page-footer { flex-direction: column; gap: 8px; }
+}
+@media (max-width: 520px) {
+  .field-row-2, .field-row-4 { grid-template-columns: 1fr; }
 }
 @media (max-width: 420px) {
   .content, .notice { margin-inline: 14px; }
