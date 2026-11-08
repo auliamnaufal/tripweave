@@ -1,0 +1,3 @@
+- Prefers using pstack skills to support development on this project. Confidence: 0.9
+- Prefers a full agentic architecture where an agent orchestrates the work (searching for best prices, hotels, itinerary creation) via tool calls, rather than a single thin/bounded model call. Confidence: 0.85
+- Prefers using LangChain/LangGraph for agent orchestration and "robust management" rather than hand-rolling the tool loop. Confidence: 0.7
