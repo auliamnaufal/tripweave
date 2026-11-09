@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
-import { runPlannerAgent } from "@/features/agent/plannerAgent";
+import { streamPlannerAgent, type AgentOutput } from "@/features/agent/plannerAgent";
 
 vi.mock("@/features/agent/plannerAgent", () => ({
-  runPlannerAgent: vi.fn(),
+  streamPlannerAgent: vi.fn(),
 }));
 
 vi.mock("@/features/suppliers/duffel", async () => {
@@ -26,7 +26,7 @@ const validBrief = {
 };
 
 afterEach(() => {
-  vi.mocked(runPlannerAgent).mockReset();
+  vi.mocked(streamPlannerAgent).mockReset();
 });
 
 function post(body: string): Promise<Response> {
@@ -39,6 +39,29 @@ function post(body: string): Promise<Response> {
   );
 }
 
+/** Mimics streamPlannerAgent's real shape: an async generator that returns the final AgentOutput. */
+function agentGenerator(output: AgentOutput): ReturnType<typeof streamPlannerAgent> {
+  async function* generator() {
+    return output;
+  }
+  return generator();
+}
+
+function failingAgentGenerator(error: Error): ReturnType<typeof streamPlannerAgent> {
+  async function* generator(): AsyncGenerator<never, never> {
+    throw error;
+  }
+  return generator();
+}
+
+async function readLines(response: Response): Promise<unknown[]> {
+  const text = await response.text();
+  return text
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line));
+}
+
 describe("POST /api/plan", () => {
   it("returns 400 for malformed briefs", async () => {
     for (const body of ["not-json", "{}"]) {
@@ -48,32 +71,37 @@ describe("POST /api/plan", () => {
     }
   });
 
-  it("returns a generic 503 when the agent fails without leaking the cause", async () => {
-    vi.mocked(runPlannerAgent).mockRejectedValue(new Error("raw provider failure"));
-
-    const response = await post(JSON.stringify(validBrief));
-
-    expect(response.status).toBe(503);
-    const body = await response.json();
-    expect(body).toEqual({ error: "The planner is unavailable. Please try again." });
-    expect(JSON.stringify(body)).not.toContain("raw provider failure");
-  });
-
-  it("recomputes the deterministic plan from the agent's selected offer ids", async () => {
-    vi.mocked(runPlannerAgent).mockResolvedValue({
-      offerIds: ["flight-arrival", "hotel-main", "activity-0-beach"],
-      note: "A simple plan under budget.",
-    });
+  it("streams an error event when the agent fails, without leaking the cause", async () => {
+    vi.mocked(streamPlannerAgent).mockReturnValue(failingAgentGenerator(new Error("raw provider failure")));
 
     const response = await post(JSON.stringify(validBrief));
 
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.note).toBe("A simple plan under budget.");
-    expect(body.source).toBe("duffel+synthetic");
-    expect(body.plan.totalCostMinorUnits).toBe(157000);
-    expect(body.plan.status).toBe("feasible");
-    expect(body.plan.offers.map((offer: { id: string }) => offer.id)).toEqual([
+    const events = await readLines(response);
+    expect(events).toEqual([{ kind: "error", message: "The planner is unavailable. Please try again." }]);
+  });
+
+  it("streams the recomputed deterministic plan from the agent's selected offer ids", async () => {
+    vi.mocked(streamPlannerAgent).mockReturnValue(
+      agentGenerator({
+        offerIds: ["flight-arrival", "hotel-main", "activity-0-beach"],
+        note: "A simple plan under budget.",
+      }),
+    );
+
+    const response = await post(JSON.stringify(validBrief));
+
+    expect(response.status).toBe(200);
+    const events = await readLines(response);
+    expect(events).toHaveLength(1);
+    const [planEvent] = events as [Record<string, unknown>];
+    expect(planEvent.kind).toBe("plan");
+    expect(planEvent.note).toBe("A simple plan under budget.");
+    expect(planEvent.source).toBe("duffel+synthetic");
+    const plan = planEvent.plan as { totalCostMinorUnits: number; status: string; offers: { id: string }[] };
+    expect(plan.totalCostMinorUnits).toBe(157000);
+    expect(plan.status).toBe("feasible");
+    expect(plan.offers.map((offer) => offer.id)).toEqual([
       "flight-arrival",
       "hotel-main",
       "activity-0-beach",

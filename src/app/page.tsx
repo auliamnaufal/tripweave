@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { itineraryPlanSchema, type ItineraryPlanView } from "@/features/planner/travelOffer";
+import { itineraryPlanSchema, type ItineraryPlanView, type TravelOfferView } from "@/features/planner/travelOffer";
+import type { PlanStreamEvent } from "@/app/api/plan/route";
+import type { CaptureStreamEvent } from "@/app/api/payments/capture/route";
+
+type BookingSummary = Extract<CaptureStreamEvent, { kind: "summary" }>;
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -11,6 +15,34 @@ const money = new Intl.NumberFormat("en-US", {
 });
 
 type Payment = { orderId: string; approveUrl: string };
+
+type ProcessEntry =
+  | { kind: "step"; tool: string; label: string; summary?: string }
+  | { kind: "note"; text: string };
+
+/** Splits a fetch stream into newline-delimited JSON objects, buffering partial lines across chunks. */
+async function* readNdjson<T>(body: ReadableStream<Uint8Array>): AsyncGenerator<T> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line) yield JSON.parse(line) as T;
+      newlineIndex = buffer.indexOf("\n");
+    }
+  }
+}
+
+/** Picks which offer the demo deliberately fails to book, so the failure+refund branch is reliable on stage. */
+function pickDemoFailureOfferId(offers: readonly TravelOfferView[]): string | undefined {
+  return (offers.find((offer) => offer.productKind === "activity") ?? offers[0])?.id;
+}
 
 const PREFERENCE_SUGGESTIONS = ["beach", "local food", "nightlife", "nature", "museums", "relaxed pace"];
 
@@ -52,10 +84,15 @@ export default function Home() {
   const [preferences, setPreferences] = useState("beach, local food");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
+  const [process, setProcess] = useState<ProcessEntry[]>([]);
   const [note, setNote] = useState("");
   const [plan, setPlan] = useState<ItineraryPlanView | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
   const [paymentStatus, setPaymentStatus] = useState("");
+  const [booking, setBooking] = useState(false);
+  const [bookingProcess, setBookingProcess] = useState<ProcessEntry[]>([]);
+  const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null);
+  const [simulateFailure, setSimulateFailure] = useState(false);
 
   function addPreference(tag: string) {
     const current = preferences.split(",").map((item) => item.trim()).filter(Boolean);
@@ -63,9 +100,27 @@ export default function Home() {
     setPreferences([...current, tag].join(", "));
   }
 
+  function appendToolCall(setter: typeof setProcess, tool: string, label: string) {
+    setter((prev) => [...prev, { kind: "step", tool, label }]);
+  }
+
+  function appendToolResult(setter: typeof setProcess, tool: string, summary: string) {
+    setter((prev) => {
+      const lastPendingIndex = prev.findLastIndex(
+        (entry) => entry.kind === "step" && entry.tool === tool && entry.summary === undefined,
+      );
+      if (lastPendingIndex === -1) return prev;
+      const pending = prev[lastPendingIndex] as Extract<ProcessEntry, { kind: "step" }>;
+      const next = [...prev];
+      next[lastPendingIndex] = { ...pending, summary };
+      return next;
+    });
+  }
+
   async function planTrip() {
     setLoading(true);
-    setStatus("Planning your trip...");
+    setStatus("");
+    setProcess([]);
     setPlan(null);
     setNote("");
     setPayment(null);
@@ -88,19 +143,26 @@ export default function Home() {
           constraints: [],
         }),
       });
-      const result: unknown = await response.json();
-      if (!response.ok) {
-        setStatus((result as { error?: string }).error ?? "Planning failed.");
+      if (!response.ok || !response.body) {
+        const result: unknown = await response.json().catch(() => null);
+        setStatus((result as { error?: string } | null)?.error ?? "Planning failed.");
         return;
       }
-      const parsed = itineraryPlanSchema.safeParse((result as { plan?: unknown }).plan);
-      if (!parsed.success) {
-        setStatus("The planner returned an invalid plan.");
-        return;
+      for await (const event of readNdjson<PlanStreamEvent>(response.body)) {
+        if (event.kind === "tool-call") appendToolCall(setProcess, event.tool, event.label);
+        else if (event.kind === "tool-result") appendToolResult(setProcess, event.tool, event.summary);
+        else if (event.kind === "note") setProcess((prev) => [...prev, { kind: "note", text: event.text }]);
+        else if (event.kind === "error") setStatus(event.message);
+        else if (event.kind === "plan") {
+          const parsed = itineraryPlanSchema.safeParse(event.plan);
+          if (!parsed.success) {
+            setStatus("The planner returned an invalid plan.");
+            continue;
+          }
+          setPlan(parsed.data);
+          setNote(event.note);
+        }
       }
-      setPlan(parsed.data);
-      setNote((result as { note?: string }).note ?? "");
-      setStatus("");
     } catch {
       setStatus("Could not reach the planner.");
     } finally {
@@ -109,10 +171,17 @@ export default function Home() {
   }
 
   async function startPayment() {
+    if (!plan) return;
     setPaymentStatus("");
     setPayment(null);
+    setBookingProcess([]);
+    setBookingSummary(null);
     try {
-      const response = await fetch("/api/payments/order", { method: "POST" });
+      const response = await fetch("/api/payments/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offers: plan.offers }),
+      });
       const result: unknown = await response.json();
       if (!response.ok) {
         setPaymentStatus((result as { error?: string }).error ?? "Payment unavailable.");
@@ -127,22 +196,43 @@ export default function Home() {
   }
 
   async function confirmPayment() {
-    if (!payment) return;
+    if (!payment || !plan) return;
     setPaymentStatus("Confirming payment...");
+    setBookingProcess([]);
+    setBookingSummary(null);
+    setBooking(true);
     try {
       const response = await fetch("/api/payments/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: payment.orderId }),
+        body: JSON.stringify({
+          orderId: payment.orderId,
+          offers: plan.offers,
+          forceFailureOfferId: simulateFailure ? pickDemoFailureOfferId(plan.offers) : undefined,
+        }),
       });
-      const result: unknown = await response.json();
-      if (!response.ok) {
-        setPaymentStatus((result as { error?: string }).error ?? "Payment failed.");
+      if (!response.ok || !response.body) {
+        const result: unknown = await response.json().catch(() => null);
+        setPaymentStatus((result as { error?: string } | null)?.error ?? "Payment failed.");
         return;
       }
-      setPaymentStatus(`Payment status: ${(result as { status: string }).status}`);
+      for await (const event of readNdjson<CaptureStreamEvent>(response.body)) {
+        if (event.kind === "tool-call") appendToolCall(setBookingProcess, event.tool, event.label);
+        else if (event.kind === "tool-result") appendToolResult(setBookingProcess, event.tool, event.summary);
+        else if (event.kind === "note") setBookingProcess((prev) => [...prev, { kind: "note", text: event.text }]);
+        else if (event.kind === "payment") setPaymentStatus(`Payment ${event.status.toLowerCase()}.`);
+        else if (event.kind === "refund") {
+          setBookingProcess((prev) => [
+            ...prev,
+            { kind: "note", text: `Refunded ${money.format(event.amountMinorUnits / 100)} — that item couldn't be booked.` },
+          ]);
+        } else if (event.kind === "summary") setBookingSummary(event);
+        else if (event.kind === "error") setPaymentStatus(event.message);
+      }
     } catch {
       setPaymentStatus("Could not confirm payment.");
+    } finally {
+      setBooking(false);
     }
   }
 
@@ -154,7 +244,7 @@ export default function Home() {
           Tripweave
         </Link>
         <span className="demo-status">
-          <span aria-hidden="true">●</span>Plan costs $5 · not a travel booking
+          <span aria-hidden="true">●</span>Sandbox PayPal · one payment, agent books each item (simulated)
         </span>
       </div>
 
@@ -308,11 +398,37 @@ export default function Home() {
               {plan && <span className="fixture-label">{note ? "AI-assembled" : "Recomputed"}</span>}
             </div>
 
-            {!plan && (
+            {!loading && process.length === 0 && !plan && (
               <p className="panel-copy" style={{ marginTop: 12 }}>
                 No plan yet. Fill in the trip brief and select &ldquo;Plan my trip&rdquo; to see offers, a
                 day-by-day schedule, and a budget breakdown here.
               </p>
+            )}
+
+            {process.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <p className="section-kicker">Agent process</p>
+                <ol className="process-list">
+                  {process.map((entry, index) =>
+                    entry.kind === "note" ? (
+                      <li key={index} className="process-note">
+                        &ldquo;{entry.text}&rdquo;
+                      </li>
+                    ) : (
+                      <li
+                        key={index}
+                        className={entry.summary ? "process-step" : "process-step process-step-active"}
+                      >
+                        <span className="process-dot" aria-hidden="true" />
+                        <span>
+                          {entry.label}
+                          {entry.summary && <span className="process-summary">{entry.summary}</span>}
+                        </span>
+                      </li>
+                    ),
+                  )}
+                </ol>
+              </div>
             )}
 
             {plan && (
@@ -433,13 +549,23 @@ export default function Home() {
 
                 {plan.status === "feasible" && (
                   <div className="payment-panel">
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <input
+                        type="checkbox"
+                        checked={simulateFailure}
+                        onChange={(event) => setSimulateFailure(event.target.checked)}
+                      />
+                      Simulate a failed booking (demo)
+                    </label>
                     <button type="button" className="guidance-button" onClick={startPayment}>
-                      Buy this plan for $5
+                      Pay {money.format(plan.totalCostMinorUnits / 100)} and book
                       <span aria-hidden="true">→</span>
                     </button>
                     <p className="payment-note">
-                      You are buying Tripweave&apos;s itinerary plan, not a hotel or flight booking. Sample
-                      offers stay clearly labeled.
+                      One PayPal payment covers the full itinerary; Tripweave is the seller. Its agent then
+                      books each item separately below — booking is simulated in this demo, since real
+                      supplier order creation (Duffel, Booking.com) is gated behind partner approval we
+                      don&apos;t have yet.
                     </p>
                   </div>
                 )}
@@ -450,8 +576,8 @@ export default function Home() {
                       Open PayPal approval →
                     </a>
                     <div>
-                      <button type="button" className="secondary-button" onClick={confirmPayment}>
-                        Confirm payment
+                      <button type="button" className="secondary-button" onClick={confirmPayment} disabled={booking}>
+                        {booking ? "Booking…" : "Confirm payment & book"}
                       </button>
                     </div>
                   </div>
@@ -461,13 +587,65 @@ export default function Home() {
                     {paymentStatus}
                   </p>
                 )}
+
+                {bookingProcess.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <p className="section-kicker">Booking process</p>
+                    <ol className="process-list">
+                      {bookingProcess.map((entry, index) =>
+                        entry.kind === "note" ? (
+                          <li key={index} className="process-note">
+                            &ldquo;{entry.text}&rdquo;
+                          </li>
+                        ) : (
+                          <li
+                            key={index}
+                            className={entry.summary ? "process-step" : "process-step process-step-active"}
+                          >
+                            <span className="process-dot" aria-hidden="true" />
+                            <span>
+                              {entry.label}
+                              {entry.summary && <span className="process-summary">{entry.summary}</span>}
+                            </span>
+                          </li>
+                        ),
+                      )}
+                    </ol>
+                  </div>
+                )}
+
+                {bookingSummary && (
+                  <div style={{ marginTop: 16 }}>
+                    <p className="section-kicker">Booking result</p>
+                    <p className="ai-explanation">
+                      <span>AI</span> {bookingSummary.note}
+                    </p>
+                    <ul className="budget-list">
+                      {bookingSummary.results.map((result) => (
+                        <li key={result.offerId} className="budget-row">
+                          <span>{result.offerId}</span>
+                          <span>
+                            {result.status === "booked" ? "Booked" : `Failed — ${result.reason}`}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="panel-copy">
+                      {money.format(bookingSummary.bookedMinorUnits / 100)} booked ·{" "}
+                      {money.format(bookingSummary.refundedMinorUnits / 100)} refunded
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </section>
         </div>
 
         <div className="page-footer">
-          <p>Prices, availability, and booking state are synthetic except live flight fares. Nothing is booked or reserved here.</p>
+          <p>
+            Prices and availability are synthetic except live flight fares. Bookings made after payment are
+            simulated — real supplier order creation needs partner access this demo doesn&apos;t have yet.
+          </p>
           <span>TRIPWEAVE · DEMO</span>
         </div>
       </main>

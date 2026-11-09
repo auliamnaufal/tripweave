@@ -1,7 +1,5 @@
 import { Buffer } from "node:buffer";
 
-export const PLAN_PRICE_MINOR_UNITS = 500;
-
 function baseUrl(): string {
   return process.env.PAYPAL_MODE === "live"
     ? "https://api-m.paypal.com"
@@ -25,7 +23,7 @@ async function accessToken(): Promise<string> {
   return token.access_token;
 }
 
-export async function createPlanOrder(): Promise<{ id: string; approveUrl: string }> {
+export async function createPlanOrder(amountMinorUnits: number): Promise<{ id: string; approveUrl: string }> {
   const token = await accessToken();
   const response = await fetch(`${baseUrl()}/v2/checkout/orders`, {
     method: "POST",
@@ -39,7 +37,7 @@ export async function createPlanOrder(): Promise<{ id: string; approveUrl: strin
         {
           amount: {
             currency_code: "USD",
-            value: (PLAN_PRICE_MINOR_UNITS / 100).toFixed(2),
+            value: (amountMinorUnits / 100).toFixed(2),
           },
         },
       ],
@@ -55,17 +53,35 @@ export async function createPlanOrder(): Promise<{ id: string; approveUrl: strin
   return { id: order.id, approveUrl: approve.href };
 }
 
-export async function getPlanOrder(orderId: string): Promise<{ status: string }> {
+type OrderDetail = {
+  status: string;
+  purchase_units?: {
+    amount?: { value?: string };
+    payments?: { captures?: { id: string }[] };
+  }[];
+};
+
+function readOrderDetail(order: OrderDetail): { status: string; amountMinorUnits: number; captureId?: string } {
+  const unit = order.purchase_units?.[0];
+  const amountMinorUnits = Math.round(parseFloat(unit?.amount?.value ?? "0") * 100);
+  const captureId = unit?.payments?.captures?.[0]?.id;
+  return { status: order.status, amountMinorUnits, captureId };
+}
+
+export async function getPlanOrder(
+  orderId: string,
+): Promise<{ status: string; amountMinorUnits: number; captureId?: string }> {
   const token = await accessToken();
   const response = await fetch(`${baseUrl()}/v2/checkout/orders/${orderId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) throw new Error("PayPal order lookup failed.");
-  const order = (await response.json()) as { status: string };
-  return { status: order.status };
+  return readOrderDetail((await response.json()) as OrderDetail);
 }
 
-export async function capturePlanOrder(orderId: string): Promise<{ status: string }> {
+export async function capturePlanOrder(
+  orderId: string,
+): Promise<{ status: string; amountMinorUnits: number; captureId?: string }> {
   const existing = await getPlanOrder(orderId);
   if (existing.status === "COMPLETED") return existing;
   const token = await accessToken();
@@ -77,6 +93,25 @@ export async function capturePlanOrder(orderId: string): Promise<{ status: strin
     },
   });
   if (!response.ok) throw new Error("PayPal capture failed.");
-  const result = (await response.json()) as { status: string };
-  return { status: result.status };
+  return readOrderDetail((await response.json()) as OrderDetail);
+}
+
+export async function refundCapture(
+  captureId: string,
+  amountMinorUnits: number,
+): Promise<{ status: string; refundId: string }> {
+  const token = await accessToken();
+  const response = await fetch(`${baseUrl()}/v2/payments/captures/${captureId}/refund`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      amount: { currency_code: "USD", value: (amountMinorUnits / 100).toFixed(2) },
+    }),
+  });
+  if (!response.ok) throw new Error("PayPal refund failed.");
+  const result = (await response.json()) as { id: string; status: string };
+  return { status: result.status, refundId: result.id };
 }
