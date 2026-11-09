@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { capturePlanOrder, refundCapture } from "@/features/payments/paypal";
-import { travelOfferSchema, type TravelOffer, type TravelOfferView } from "@/features/planner/travelOffer";
-import { minorUnits, zonedDateTime } from "@/features/planner/types";
+import { BUNDLE_REFERENCE_ID, capturePlanOrder, refundCapture, type PurchaseUnitCapture } from "@/features/payments/paypal";
+import { toTravelOffer, travelOfferSchema, type TravelOffer } from "@/features/planner/travelOffer";
 import { reconcileBookings } from "@/features/suppliers/booking";
 import {
   streamBookingAgent,
@@ -20,6 +19,11 @@ const captureRequestSchema = z.object({
 export type CaptureStreamEvent =
   | BookingStreamEvent
   | { kind: "payment"; status: string; amountMinorUnits: number }
+  // Real money paid straight to an Onboarded Supplier's own PayPal account, as
+  // its own purchase unit on this same order. Reported honestly: PayPal's own
+  // capture status for that unit, which can land PENDING/PENDING_REVIEW rather
+  // than COMPLETED (see docs/research/live-sandbox-third-party-payee-test-2026-11-09.md).
+  | { kind: "direct-payment"; offerId: string; status: string; reason?: string; amountMinorUnits: number }
   | { kind: "refund"; offerId: string; amountMinorUnits: number; status: string }
   | {
       kind: "summary";
@@ -32,15 +36,6 @@ export type CaptureStreamEvent =
 
 function ndjsonLine(event: CaptureStreamEvent): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(event)}\n`);
-}
-
-function toTravelOffer(view: TravelOfferView): TravelOffer {
-  return {
-    ...view,
-    startsAt: zonedDateTime(view.startsAt),
-    endsAt: zonedDateTime(view.endsAt),
-    costMinorUnits: minorUnits(view.costMinorUnits),
-  };
 }
 
 export async function POST(request: Request) {
@@ -56,29 +51,76 @@ export async function POST(request: Request) {
     async start(controller) {
       try {
         // The one and only moment the traveler's PayPal account is touched.
-        // Everything after this is Tripweave spending money it already has.
+        // Everything after this is Tripweave (or, for an Onboarded Supplier's
+        // own purchase unit, that supplier directly) spending money already captured.
         const captured = await capturePlanOrder(input.orderId);
-        controller.enqueue(
-          ndjsonLine({ kind: "payment", status: captured.status, amountMinorUnits: captured.amountMinorUnits }),
-        );
+        const amountMinorUnits = captured.purchaseUnits.reduce((sum, unit) => sum + unit.amountMinorUnits, 0);
+        controller.enqueue(ndjsonLine({ kind: "payment", status: captured.status, amountMinorUnits }));
 
         if (captured.status !== "COMPLETED") {
           controller.enqueue(ndjsonLine({ kind: "error", message: "Payment was not completed." }));
           return;
         }
-        if (!captured.captureId) {
-          throw new Error("Capture succeeded but returned no capture id to refund against.");
-        }
 
-        const offersTotal = input.offers.reduce((sum, offer) => sum + offer.costMinorUnits, 0);
-        if (offersTotal !== captured.amountMinorUnits) {
+        // An Onboarded Supplier's offer was its own purchase unit, paid directly;
+        // everything else summed into Tripweave's own bundle unit and still needs
+        // a Supplier Booking. See GLOSSARY.md and docs/adr/0002.
+        const needsBooking = input.offers.filter((offer) => !offer.supplierPayeeEmail);
+        const alreadyPaidDirect = input.offers.filter((offer) => offer.supplierPayeeEmail);
+
+        const unitByReferenceId = new Map<string, PurchaseUnitCapture>(
+          captured.purchaseUnits.map((unit) => [unit.referenceId, unit]),
+        );
+        const bundleUnit = unitByReferenceId.get(BUNDLE_REFERENCE_ID);
+        const bundleCapturedAmount = bundleUnit?.amountMinorUnits ?? 0;
+
+        // The offers must reconcile against what PayPal actually captured, per
+        // purchase unit — not just against the order's grand total, which now
+        // mixes money that's Tripweave's to book with money that already went
+        // straight to a supplier and isn't Tripweave's at all.
+        const needsBookingTotal = needsBooking.reduce((sum, offer) => sum + offer.costMinorUnits, 0);
+        const directAmountMismatch = alreadyPaidDirect.some(
+          (offer) => unitByReferenceId.get(offer.id)?.amountMinorUnits !== offer.costMinorUnits,
+        );
+        if (needsBookingTotal !== bundleCapturedAmount || directAmountMismatch) {
           controller.enqueue(
             ndjsonLine({ kind: "error", message: "The paid amount does not match this itinerary." }),
           );
           return;
         }
 
-        const bookingSteps = streamBookingAgent(input.offers, input.forceFailureOfferId);
+        for (const offer of alreadyPaidDirect) {
+          const unit = unitByReferenceId.get(offer.id);
+          if (!unit) continue;
+          controller.enqueue(
+            ndjsonLine({
+              kind: "direct-payment",
+              offerId: offer.id,
+              status: unit.captureStatus ?? captured.status,
+              reason: unit.captureStatusReason,
+              amountMinorUnits: unit.amountMinorUnits,
+            }),
+          );
+        }
+
+        if (needsBooking.length === 0) {
+          controller.enqueue(
+            ndjsonLine({
+              kind: "summary",
+              results: [],
+              note: "Every offer was paid directly to its own supplier. No simulated booking was needed.",
+              bookedMinorUnits: 0,
+              refundedMinorUnits: 0,
+            }),
+          );
+          return;
+        }
+
+        if (!bundleUnit?.captureId) {
+          throw new Error("Capture succeeded but returned no capture id to refund against.");
+        }
+
+        const bookingSteps = streamBookingAgent(needsBooking, input.forceFailureOfferId);
         let step = await bookingSteps.next();
         while (!step.done) {
           controller.enqueue(ndjsonLine(step.value));
@@ -87,13 +129,13 @@ export async function POST(request: Request) {
         const { results, note } = step.value;
 
         const { refunds, bookedMinorUnits, refundedMinorUnits } = reconcileBookings(
-          input.offers,
+          needsBooking,
           results,
-          captured.amountMinorUnits,
+          bundleCapturedAmount,
         );
 
         for (const refund of refunds) {
-          const result = await refundCapture(captured.captureId, refund.amountMinorUnits);
+          const result = await refundCapture(bundleUnit.captureId, refund.amountMinorUnits);
           controller.enqueue(
             ndjsonLine({
               kind: "refund",

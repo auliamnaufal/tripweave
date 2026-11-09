@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
-import { capturePlanOrder, refundCapture } from "@/features/payments/paypal";
+import { capturePlanOrder, refundCapture, type PlanOrderStatus } from "@/features/payments/paypal";
 import { streamBookingAgent, type BookingAgentOutput } from "@/features/agent/bookingAgent";
 
 vi.mock("@/features/payments/paypal", () => ({
+  BUNDLE_REFERENCE_ID: "tripweave-bundle",
   capturePlanOrder: vi.fn(),
   refundCapture: vi.fn(),
 }));
@@ -64,6 +65,16 @@ function bookingGenerator(output: BookingAgentOutput): ReturnType<typeof streamB
   return generator();
 }
 
+/** A capture result with a single bundle purchase unit — today's no-onboarded-supplier case. */
+function bundleCapture(amountMinorUnits: number, status = "COMPLETED", captureId = "capture-1"): PlanOrderStatus {
+  return {
+    status: "COMPLETED",
+    purchaseUnits: [
+      { referenceId: "tripweave-bundle", amountMinorUnits, captureId, captureStatus: status },
+    ],
+  };
+}
+
 async function readLines(response: Response): Promise<unknown[]> {
   const text = await response.text();
   return text
@@ -79,7 +90,10 @@ describe("POST /api/payments/capture", () => {
   });
 
   it("stops before booking when the payment did not complete", async () => {
-    vi.mocked(capturePlanOrder).mockResolvedValue({ status: "APPROVED", amountMinorUnits: 62000 });
+    vi.mocked(capturePlanOrder).mockResolvedValue({
+      status: "APPROVED",
+      purchaseUnits: [{ referenceId: "tripweave-bundle", amountMinorUnits: 62000 }],
+    });
 
     const response = await post(JSON.stringify({ orderId: "order-1", offers: [flightOffer] }));
     const events = await readLines(response);
@@ -91,12 +105,8 @@ describe("POST /api/payments/capture", () => {
     expect(streamBookingAgent).not.toHaveBeenCalled();
   });
 
-  it("stops before booking when the offers don't sum to what was captured", async () => {
-    vi.mocked(capturePlanOrder).mockResolvedValue({
-      status: "COMPLETED",
-      amountMinorUnits: 1,
-      captureId: "capture-1",
-    });
+  it("stops before booking when the offers don't sum to the bundle unit's captured amount", async () => {
+    vi.mocked(capturePlanOrder).mockResolvedValue(bundleCapture(1));
 
     const response = await post(JSON.stringify({ orderId: "order-1", offers: [flightOffer] }));
     const events = await readLines(response);
@@ -109,11 +119,7 @@ describe("POST /api/payments/capture", () => {
   });
 
   it("books every offer and streams a summary with nothing refunded when all succeed", async () => {
-    vi.mocked(capturePlanOrder).mockResolvedValue({
-      status: "COMPLETED",
-      amountMinorUnits: 157000,
-      captureId: "capture-1",
-    });
+    vi.mocked(capturePlanOrder).mockResolvedValue(bundleCapture(157000));
     vi.mocked(streamBookingAgent).mockReturnValue(
       bookingGenerator({
         results: [
@@ -143,12 +149,8 @@ describe("POST /api/payments/capture", () => {
     expect(refundCapture).not.toHaveBeenCalled();
   });
 
-  it("refunds a failed item's share and reflects it in the summary", async () => {
-    vi.mocked(capturePlanOrder).mockResolvedValue({
-      status: "COMPLETED",
-      amountMinorUnits: 157000,
-      captureId: "capture-1",
-    });
+  it("refunds a failed item's share against the bundle unit's own capture id and reflects it in the summary", async () => {
+    vi.mocked(capturePlanOrder).mockResolvedValue(bundleCapture(157000, "COMPLETED", "capture-bundle"));
     vi.mocked(streamBookingAgent).mockReturnValue(
       bookingGenerator({
         results: [
@@ -165,7 +167,7 @@ describe("POST /api/payments/capture", () => {
     );
     const events = await readLines(response);
 
-    expect(refundCapture).toHaveBeenCalledWith("capture-1", 95000);
+    expect(refundCapture).toHaveBeenCalledWith("capture-bundle", 95000);
     expect(events).toContainEqual({
       kind: "refund",
       offerId: "hotel-main",
@@ -185,11 +187,7 @@ describe("POST /api/payments/capture", () => {
   });
 
   it("streams a generic error if booking throws, without leaking the cause", async () => {
-    vi.mocked(capturePlanOrder).mockResolvedValue({
-      status: "COMPLETED",
-      amountMinorUnits: 62000,
-      captureId: "capture-1",
-    });
+    vi.mocked(capturePlanOrder).mockResolvedValue(bundleCapture(62000));
     vi.mocked(streamBookingAgent).mockImplementation(() => {
       throw new Error("raw provider failure");
     });
@@ -198,5 +196,73 @@ describe("POST /api/payments/capture", () => {
     const events = await readLines(response);
 
     expect(events.at(-1)).toEqual({ kind: "error", message: "Booking could not be completed." });
+  });
+
+  it("pays an Onboarded Supplier's offer directly as its own purchase unit, honestly reporting a PENDING_REVIEW hold, and never routes it through simulated booking", async () => {
+    const directOffer = { ...hotelOffer, supplierPayeeEmail: "sb-r2jl753813374@personal.example.com" };
+    vi.mocked(capturePlanOrder).mockResolvedValue({
+      status: "COMPLETED",
+      purchaseUnits: [
+        { referenceId: "tripweave-bundle", amountMinorUnits: 62000, captureId: "capture-bundle", captureStatus: "COMPLETED" },
+        {
+          referenceId: "hotel-main",
+          amountMinorUnits: 95000,
+          captureId: "capture-hotel",
+          captureStatus: "PENDING",
+          captureStatusReason: "PENDING_REVIEW",
+        },
+      ],
+    });
+    vi.mocked(streamBookingAgent).mockReturnValue(
+      bookingGenerator({
+        results: [{ offerId: "flight-1", status: "booked", bookingRef: "ref-1" }],
+        note: "Booked the flight.",
+      }),
+    );
+
+    const response = await post(
+      JSON.stringify({ orderId: "order-1", offers: [flightOffer, directOffer] }),
+    );
+    const events = await readLines(response);
+
+    expect(events).toContainEqual({
+      kind: "direct-payment",
+      offerId: "hotel-main",
+      status: "PENDING",
+      reason: "PENDING_REVIEW",
+      amountMinorUnits: 95000,
+    });
+    // Only the non-direct offer went through the booking agent.
+    expect(streamBookingAgent).toHaveBeenCalledWith([flightOffer], undefined);
+    expect(refundCapture).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual({
+      kind: "summary",
+      results: [{ offerId: "flight-1", status: "booked", bookingRef: "ref-1" }],
+      note: "Booked the flight.",
+      bookedMinorUnits: 62000,
+      refundedMinorUnits: 0,
+    });
+  });
+
+  it("skips the booking agent entirely when every offer was paid directly", async () => {
+    const directOffer = { ...hotelOffer, supplierPayeeEmail: "sb-r2jl753813374@personal.example.com" };
+    vi.mocked(capturePlanOrder).mockResolvedValue({
+      status: "COMPLETED",
+      purchaseUnits: [
+        { referenceId: "hotel-main", amountMinorUnits: 95000, captureId: "capture-hotel", captureStatus: "PENDING", captureStatusReason: "PENDING_REVIEW" },
+      ],
+    });
+
+    const response = await post(JSON.stringify({ orderId: "order-1", offers: [directOffer] }));
+    const events = await readLines(response);
+
+    expect(streamBookingAgent).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual({
+      kind: "summary",
+      results: [],
+      note: "Every offer was paid directly to its own supplier. No simulated booking was needed.",
+      bookedMinorUnits: 0,
+      refundedMinorUnits: 0,
+    });
   });
 });

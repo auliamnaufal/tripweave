@@ -45,11 +45,12 @@ describe("POST /api/payments/order", () => {
 
   it("derives the order amount from the offers' own costs, not a client-sent total", async () => {
     vi.mocked(createPlanOrder).mockResolvedValue({ id: "order-1", approveUrl: "https://sandbox/approve/order-1" });
+    const flightOffer = { ...offer, id: "flight-1", costMinorUnits: 62000 };
 
-    const response = await post(JSON.stringify({ offers: [offer, { ...offer, id: "flight-1", costMinorUnits: 62000 } ] }));
+    const response = await post(JSON.stringify({ offers: [offer, flightOffer] }));
 
     expect(response.status).toBe(200);
-    expect(createPlanOrder).toHaveBeenCalledWith(157000);
+    expect(createPlanOrder).toHaveBeenCalledWith([offer, flightOffer]);
     expect(await response.json()).toEqual({
       orderId: "order-1",
       approveUrl: "https://sandbox/approve/order-1",
@@ -63,5 +64,19 @@ describe("POST /api/payments/order", () => {
     const response = await post(JSON.stringify({ offers: [offer] }));
 
     expect(response.status).toBe(503);
+  });
+
+  it("rejects a flight offer carrying a direct supplier payee", async () => {
+    const flightWithPayee = {
+      ...offer,
+      id: "flight-1",
+      productKind: "flight",
+      supplierPayeeEmail: "sb-airline@business.example.com",
+    };
+
+    const response = await post(JSON.stringify({ offers: [flightWithPayee] }));
+
+    expect(response.status).toBe(400);
+    expect(createPlanOrder).not.toHaveBeenCalled();
   });
 });

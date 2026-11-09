@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { capturePlanOrder, createPlanOrder, refundCapture } from "./paypal";
+import type { TravelOffer } from "@/features/planner/travelOffer";
+import { minorUnits, zonedDateTime } from "@/features/planner/types";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -17,62 +19,250 @@ function jsonResponse(body: unknown, ok = true): Response {
   return { ok, json: async () => body } as Response;
 }
 
-function orderDetail(status: string, amountValue: string, captureId?: string) {
+function offer(id: string, costMinorUnits: number, supplierPayeeEmail?: string): TravelOffer {
+  return {
+    id,
+    supplier: "synthetic",
+    supplierRef: `synthetic:${id}`,
+    productKind: "hotel",
+    title: id,
+    summary: "",
+    startsAt: zonedDateTime("2026-07-10T00:00:00Z"),
+    endsAt: zonedDateTime("2026-07-11T00:00:00Z"),
+    costMinorUnits: minorUnits(costMinorUnits),
+    currency: "USD",
+    retrievedAt: "2026-07-01T00:00:00Z",
+    expiresAt: "2026-07-01T00:15:00Z",
+    cancellationTerms: null,
+    synthetic: true,
+    supplierPayeeEmail,
+  };
+}
+
+/** Shape returned by GET /orders/{id} — always echoes each purchase unit's own amount. */
+function orderDetail(status: string, units: { referenceId: string; amountValue: string; captureId?: string }[]) {
   return {
     status,
-    purchase_units: [
-      {
-        amount: { value: amountValue },
-        payments: captureId ? { captures: [{ id: captureId }] } : undefined,
+    purchase_units: units.map((unit) => ({
+      reference_id: unit.referenceId,
+      amount: { value: unit.amountValue },
+      payments: unit.captureId
+        ? { captures: [{ id: unit.captureId, amount: { value: unit.amountValue } }] }
+        : undefined,
+    })),
+  };
+}
+
+/**
+ * Shape actually returned by POST /orders/{id}/capture — unlike GET, a unit does
+ * NOT echo its own top-level amount; only payments.captures[0].amount is
+ * present. Matches the real, verified single-unit and multi-payee ("Capstone
+ * test") capture payloads in
+ * docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+ */
+function captureResponse(
+  status: string,
+  units: { referenceId: string; amountValue: string; captureId: string; captureStatus?: string; reason?: string }[],
+) {
+  return {
+    status,
+    purchase_units: units.map((unit) => ({
+      reference_id: unit.referenceId,
+      payments: {
+        captures: [
+          {
+            id: unit.captureId,
+            amount: { value: unit.amountValue },
+            status: unit.captureStatus,
+            status_details: unit.reason ? { reason: unit.reason } : undefined,
+          },
+        ],
       },
-    ],
+    })),
   };
 }
 
 describe("createPlanOrder", () => {
-  it("creates a capturable order for the given amount and returns the approval link", async () => {
+  it("sums offers with no supplier payee into one bundle purchase unit with no payee", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(
         jsonResponse({
           id: "order-1",
-          links: [
-            { rel: "self", href: "https://sandbox/self" },
-            { rel: "approve", href: "https://sandbox/approve/order-1" },
-          ],
+          links: [{ rel: "approve", href: "https://sandbox/approve/order-1" }],
         }),
       );
 
-    const result = await createPlanOrder(157000);
+    const result = await createPlanOrder([offer("flight-1", 62000), offer("hotel-main", 95000)]);
 
     expect(result).toEqual({ id: "order-1", approveUrl: "https://sandbox/approve/order-1" });
     const createBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string);
-    expect(createBody.purchase_units[0].amount.value).toBe("1570.00");
+    expect(createBody.purchase_units).toEqual([
+      { reference_id: "tripweave-bundle", amount: { currency_code: "USD", value: "1570.00" } },
+    ]);
+    // Without this, PayPal's hosted page gets stuck in a "Continue to review
+    // order" loop with nowhere to redirect back to — see the comment in paypal.ts.
+    expect(createBody.application_context).toEqual({
+      shipping_preference: "NO_SHIPPING",
+      user_action: "PAY_NOW",
+    });
+  });
+
+  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching the live Capstone test shape", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "order-2",
+          links: [{ rel: "approve", href: "https://sandbox/approve/order-2" }],
+        }),
+      );
+
+    await createPlanOrder([
+      offer("flight-sim", 600),
+      offer("hotel-real", 400, "sb-r2jl753813374@personal.example.com"),
+    ]);
+
+    const createBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string);
+    expect(createBody.purchase_units).toEqual([
+      { reference_id: "tripweave-bundle", amount: { currency_code: "USD", value: "6.00" } },
+      {
+        reference_id: "hotel-real",
+        amount: { currency_code: "USD", value: "4.00" },
+        payee: { email_address: "sb-r2jl753813374@personal.example.com" },
+      },
+    ]);
+  });
+
+  it("omits the bundle unit entirely when every offer has its own payee", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "order-3", links: [{ rel: "approve", href: "https://sandbox/approve/order-3" }] }),
+      );
+
+    await createPlanOrder([offer("hotel-real", 400, "sb-r2jl753813374@personal.example.com")]);
+
+    const createBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string);
+    expect(createBody.purchase_units).toEqual([
+      {
+        reference_id: "hotel-real",
+        amount: { currency_code: "USD", value: "4.00" },
+        payee: { email_address: "sb-r2jl753813374@personal.example.com" },
+      },
+    ]);
   });
 });
 
 describe("capturePlanOrder", () => {
-  it("captures an approved order and returns its amount and capture id", async () => {
+  it("captures an approved single-unit order and returns its amount and capture id, from the capture response's own shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
-      .mockResolvedValueOnce(jsonResponse(orderDetail("APPROVED", "1570.00")))
+      .mockResolvedValueOnce(
+        jsonResponse(orderDetail("APPROVED", [{ referenceId: "tripweave-bundle", amountValue: "1570.00" }])),
+      )
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
-      .mockResolvedValueOnce(jsonResponse(orderDetail("COMPLETED", "1570.00", "capture-1")));
+      // Regression test: the real POST .../capture response has no top-level
+      // purchase_units[].amount (see captureResponse's doc comment) — a mock
+      // that always includes it (like orderDetail does) would hide this bug.
+      .mockResolvedValueOnce(
+        jsonResponse(
+          captureResponse("COMPLETED", [
+            { referenceId: "tripweave-bundle", amountValue: "1570.00", captureId: "capture-1", captureStatus: "COMPLETED" },
+          ]),
+        ),
+      );
 
     const result = await capturePlanOrder("order-1");
 
-    expect(result).toEqual({ status: "COMPLETED", amountMinorUnits: 157000, captureId: "capture-1" });
+    expect(result).toEqual({
+      status: "COMPLETED",
+      purchaseUnits: [
+        {
+          referenceId: "tripweave-bundle",
+          amountMinorUnits: 157000,
+          captureId: "capture-1",
+          captureStatus: "COMPLETED",
+          captureStatusReason: undefined,
+        },
+      ],
+    });
   });
 
   it("does not re-capture an already completed order", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
-      .mockResolvedValueOnce(jsonResponse(orderDetail("COMPLETED", "1570.00", "capture-1")));
+      .mockResolvedValueOnce(
+        jsonResponse(
+          orderDetail("COMPLETED", [{ referenceId: "tripweave-bundle", amountValue: "1570.00", captureId: "capture-1" }]),
+        ),
+      );
 
     const result = await capturePlanOrder("order-1");
 
-    expect(result).toEqual({ status: "COMPLETED", amountMinorUnits: 157000, captureId: "capture-1" });
+    expect(result).toEqual({
+      status: "COMPLETED",
+      purchaseUnits: [
+        {
+          referenceId: "tripweave-bundle",
+          amountMinorUnits: 157000,
+          captureId: "capture-1",
+          captureStatus: undefined,
+          captureStatusReason: undefined,
+        },
+      ],
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports every purchase unit from a multi-payee capture, matching the live Capstone test result", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          orderDetail("APPROVED", [
+            { referenceId: "flight-sim", amountValue: "6.00" },
+            { referenceId: "hotel-real", amountValue: "4.00" },
+          ]),
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          captureResponse("COMPLETED", [
+            { referenceId: "flight-sim", amountValue: "6.00", captureId: "capture-flight", captureStatus: "COMPLETED" },
+            {
+              referenceId: "hotel-real",
+              amountValue: "4.00",
+              captureId: "capture-hotel",
+              captureStatus: "PENDING",
+              reason: "PENDING_REVIEW",
+            },
+          ]),
+        ),
+      );
+
+    const result = await capturePlanOrder("order-7TE26225XJ6364436");
+
+    expect(result).toEqual({
+      status: "COMPLETED",
+      purchaseUnits: [
+        {
+          referenceId: "flight-sim",
+          amountMinorUnits: 600,
+          captureId: "capture-flight",
+          captureStatus: "COMPLETED",
+          captureStatusReason: undefined,
+        },
+        {
+          referenceId: "hotel-real",
+          amountMinorUnits: 400,
+          captureId: "capture-hotel",
+          captureStatus: "PENDING",
+          captureStatusReason: "PENDING_REVIEW",
+        },
+      ],
+    });
   });
 });
 

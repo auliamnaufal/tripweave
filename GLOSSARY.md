@@ -13,5 +13,9 @@ The single PayPal payment a traveller approves, sized to the Itinerary Plan's fu
 _Avoid_: wallet connection, top-up, connected wallet, booking payment.
 
 **Supplier Booking**:
-An individual purchase (one flight, the hotel, one activity) that Tripweave's agent executes against a travel supplier *after* a Trip Order captures, using Tripweave's own supplier credentials and funds — never the traveller's PayPal account. The traveller's PayPal payment funds Tripweave; it does not reach the supplier directly.
+An individual purchase (one flight, the hotel, one activity) that Tripweave's agent executes against a travel supplier *after* a Trip Order captures, using Tripweave's own supplier credentials and funds — never the traveller's PayPal account. The default when a supplier hasn't shared a PayPal email, and always the case for flights (airline ticketing settles via IATA's Billing and Settlement Plan, not through any buyer-side payment processor).
 _Avoid_: booking, reservation, purchase (without naming who is paying whom).
+
+**Onboarded Supplier**:
+A supplier (hotel, activity vendor — never an airline) who has given Tripweave its own PayPal email address. Their item becomes its own purchase unit, with its own `payee`, on the *same* Trip Order the traveller already approves — the traveller's payment settles directly to the supplier's own PayPal account instead of funding a Supplier Booking. See `docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md`.
+_Avoid_: partner, seller (PayPal's Partner Referrals/seller-onboarding products are a different, heavier mechanism this repo doesn't use).

@@ -7,6 +7,7 @@ import type { PlanStreamEvent } from "@/app/api/plan/route";
 import type { CaptureStreamEvent } from "@/app/api/payments/capture/route";
 
 type BookingSummary = Extract<CaptureStreamEvent, { kind: "summary" }>;
+type DirectPaymentEvent = Extract<CaptureStreamEvent, { kind: "direct-payment" }>;
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -93,6 +94,19 @@ export default function Home() {
   const [bookingProcess, setBookingProcess] = useState<ProcessEntry[]>([]);
   const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null);
   const [simulateFailure, setSimulateFailure] = useState(false);
+  const [directPayeeOfferId, setDirectPayeeOfferId] = useState("");
+  const [directPayeeEmail, setDirectPayeeEmail] = useState("");
+  const [directPayments, setDirectPayments] = useState<DirectPaymentEvent[]>([]);
+
+  // Demo-only: no supplier registry exists, so the Onboarded Supplier case is
+  // exercised by hand — pick one offer and give it a PayPal email.
+  function offersWithDirectPayee(offers: readonly TravelOfferView[]): TravelOfferView[] {
+    const email = directPayeeEmail.trim();
+    if (!directPayeeOfferId || !email) return [...offers];
+    return offers.map((offer) =>
+      offer.id === directPayeeOfferId ? { ...offer, supplierPayeeEmail: email } : offer,
+    );
+  }
 
   function addPreference(tag: string) {
     const current = preferences.split(",").map((item) => item.trim()).filter(Boolean);
@@ -180,7 +194,7 @@ export default function Home() {
       const response = await fetch("/api/payments/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offers: plan.offers }),
+        body: JSON.stringify({ offers: offersWithDirectPayee(plan.offers) }),
       });
       const result: unknown = await response.json();
       if (!response.ok) {
@@ -200,15 +214,17 @@ export default function Home() {
     setPaymentStatus("Confirming payment...");
     setBookingProcess([]);
     setBookingSummary(null);
+    setDirectPayments([]);
     setBooking(true);
     try {
+      const offers = offersWithDirectPayee(plan.offers);
       const response = await fetch("/api/payments/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId: payment.orderId,
-          offers: plan.offers,
-          forceFailureOfferId: simulateFailure ? pickDemoFailureOfferId(plan.offers) : undefined,
+          offers,
+          forceFailureOfferId: simulateFailure ? pickDemoFailureOfferId(offers) : undefined,
         }),
       });
       if (!response.ok || !response.body) {
@@ -221,6 +237,7 @@ export default function Home() {
         else if (event.kind === "tool-result") appendToolResult(setBookingProcess, event.tool, event.summary);
         else if (event.kind === "note") setBookingProcess((prev) => [...prev, { kind: "note", text: event.text }]);
         else if (event.kind === "payment") setPaymentStatus(`Payment ${event.status.toLowerCase()}.`);
+        else if (event.kind === "direct-payment") setDirectPayments((prev) => [...prev, event]);
         else if (event.kind === "refund") {
           setBookingProcess((prev) => [
             ...prev,
@@ -557,6 +574,32 @@ export default function Home() {
                       />
                       Simulate a failed booking (demo)
                     </label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+                      <span>Pay one offer&apos;s supplier directly (PayPal email, demo):</span>
+                      <select
+                        value={directPayeeOfferId}
+                        onChange={(event) => setDirectPayeeOfferId(event.target.value)}
+                      >
+                        <option value="">— none —</option>
+                        {/* Never flights: airline ticketing settles via IATA's Billing and Settlement
+                            Plan, not through any buyer-side payment processor — see GLOSSARY.md's
+                            Supplier Booking entry. A flight is never a legitimate direct-payee target. */}
+                        {plan.offers
+                          .filter((offer) => offer.productKind !== "flight")
+                          .map((offer) => (
+                            <option key={offer.id} value={offer.id}>
+                              {offer.title}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        type="email"
+                        value={directPayeeEmail}
+                        onChange={(event) => setDirectPayeeEmail(event.target.value)}
+                        placeholder="sb-supplier@personal.example.com"
+                        style={{ minWidth: 220 }}
+                      />
+                    </div>
                     <button type="button" className="guidance-button" onClick={startPayment}>
                       Pay {money.format(plan.totalCostMinorUnits / 100)} and book
                       <span aria-hidden="true">→</span>
@@ -586,6 +629,23 @@ export default function Home() {
                   <p className="inline-status" role="status" style={{ marginTop: 8 }}>
                     {paymentStatus}
                   </p>
+                )}
+
+                {directPayments.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <p className="section-kicker">Paid directly to supplier — real money, not simulated</p>
+                    <ul className="budget-list">
+                      {directPayments.map((event) => (
+                        <li key={event.offerId} className="budget-row">
+                          <span>{event.offerId}</span>
+                          <span>
+                            {money.format(event.amountMinorUnits / 100)} — {event.status}
+                            {event.reason ? ` (${event.reason})` : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
 
                 {bookingProcess.length > 0 && (

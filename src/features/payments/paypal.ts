@@ -1,4 +1,7 @@
 import { Buffer } from "node:buffer";
+import type { TravelOffer } from "@/features/planner/travelOffer";
+
+export const BUNDLE_REFERENCE_ID = "tripweave-bundle";
 
 function baseUrl(): string {
   return process.env.PAYPAL_MODE === "live"
@@ -23,7 +26,53 @@ async function accessToken(): Promise<string> {
   return token.access_token;
 }
 
-export async function createPlanOrder(amountMinorUnits: number): Promise<{ id: string; approveUrl: string }> {
+/** One purchase unit's plan: Tripweave's own bundle, or an Onboarded Supplier's own payee. */
+type PurchaseUnitPlan =
+  | { referenceId: typeof BUNDLE_REFERENCE_ID; amountMinorUnits: number }
+  | { referenceId: string; amountMinorUnits: number; payeeEmail: string };
+
+/**
+ * One purchase unit per Onboarded Supplier (its own payee, keyed by offer id),
+ * plus one shared bundle unit for every other offer, summed under Tripweave's
+ * own account (no payee field — same as today's default-payee behavior).
+ */
+function planPurchaseUnits(offers: readonly TravelOffer[]): PurchaseUnitPlan[] {
+  let bundleMinorUnits = 0;
+  const directUnits: PurchaseUnitPlan[] = [];
+
+  for (const offer of offers) {
+    if (offer.supplierPayeeEmail) {
+      directUnits.push({
+        referenceId: offer.id,
+        amountMinorUnits: offer.costMinorUnits,
+        payeeEmail: offer.supplierPayeeEmail,
+      });
+    } else {
+      bundleMinorUnits += offer.costMinorUnits;
+    }
+  }
+
+  if (bundleMinorUnits > 0 || directUnits.length === 0) {
+    return [{ referenceId: BUNDLE_REFERENCE_ID, amountMinorUnits: bundleMinorUnits }, ...directUnits];
+  }
+  return directUnits;
+}
+
+// Matches the exact shape proven live in the "Capstone test" of
+// docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+function toWirePurchaseUnit(plan: PurchaseUnitPlan) {
+  return {
+    reference_id: plan.referenceId,
+    amount: { currency_code: "USD", value: (plan.amountMinorUnits / 100).toFixed(2) },
+    ...("payeeEmail" in plan ? { payee: { email_address: plan.payeeEmail } } : {}),
+  };
+}
+
+function buildPurchaseUnits(offers: readonly TravelOffer[]) {
+  return planPurchaseUnits(offers).map(toWirePurchaseUnit);
+}
+
+export async function createPlanOrder(offers: readonly TravelOffer[]): Promise<{ id: string; approveUrl: string }> {
   const token = await accessToken();
   const response = await fetch(`${baseUrl()}/v2/checkout/orders`, {
     method: "POST",
@@ -33,14 +82,18 @@ export async function createPlanOrder(amountMinorUnits: number): Promise<{ id: s
     },
     body: JSON.stringify({
       intent: "CAPTURE",
-      purchase_units: [
-        {
-          amount: {
-            currency_code: "USD",
-            value: (amountMinorUnits / 100).toFixed(2),
-          },
-        },
-      ],
+      purchase_units: buildPurchaseUnits(offers),
+      // Without this, PayPal's hosted page shows a "Continue to review order"
+      // button that tries to redirect back to a merchant return_url we never
+      // set — with nowhere to go, it just reloads the same page instead of
+      // completing. user_action: PAY_NOW finishes the transaction entirely on
+      // PayPal's own page instead. See PayPal's own "Unintended PayPal
+      // Checkout Flow" support article. We also never collect shipping for a
+      // digital trip plan, so suppress that prompt too.
+      application_context: {
+        shipping_preference: "NO_SHIPPING",
+        user_action: "PAY_NOW",
+      },
     }),
   });
   if (!response.ok) throw new Error("PayPal order creation failed.");
@@ -56,21 +109,54 @@ export async function createPlanOrder(amountMinorUnits: number): Promise<{ id: s
 type OrderDetail = {
   status: string;
   purchase_units?: {
+    reference_id?: string;
     amount?: { value?: string };
-    payments?: { captures?: { id: string }[] };
+    payments?: {
+      captures?: {
+        id: string;
+        amount?: { value?: string };
+        status?: string;
+        status_details?: { reason?: string };
+      }[];
+    };
   }[];
 };
 
-function readOrderDetail(order: OrderDetail): { status: string; amountMinorUnits: number; captureId?: string } {
-  const unit = order.purchase_units?.[0];
-  const amountMinorUnits = Math.round(parseFloat(unit?.amount?.value ?? "0") * 100);
-  const captureId = unit?.payments?.captures?.[0]?.id;
-  return { status: order.status, amountMinorUnits, captureId };
+/** One purchase unit's outcome: what it cost, who captured it, and (for a real third-party payee) whether that capture is actually done yet. */
+export type PurchaseUnitCapture = {
+  referenceId: string;
+  amountMinorUnits: number;
+  captureId?: string;
+  captureStatus?: string;
+  captureStatusReason?: string;
+};
+
+export type PlanOrderStatus = {
+  status: string;
+  purchaseUnits: PurchaseUnitCapture[];
+};
+
+// PayPal's GET /orders/{id} response echoes each purchase unit's own amount
+// (the order's original amount), but the POST .../capture response does not —
+// it only carries the amount inside that unit's payments.captures[0].amount.
+// Prefer each unit's own capture amount whenever one exists: it's what was
+// actually captured, and the only value present right after a capture call.
+function readOrderDetail(order: OrderDetail): PlanOrderStatus {
+  const purchaseUnits = (order.purchase_units ?? []).map((unit) => {
+    const capture = unit.payments?.captures?.[0];
+    const amountValue = capture?.amount?.value ?? unit.amount?.value ?? "0";
+    return {
+      referenceId: unit.reference_id ?? BUNDLE_REFERENCE_ID,
+      amountMinorUnits: Math.round(parseFloat(amountValue) * 100),
+      captureId: capture?.id,
+      captureStatus: capture?.status,
+      captureStatusReason: capture?.status_details?.reason,
+    };
+  });
+  return { status: order.status, purchaseUnits };
 }
 
-export async function getPlanOrder(
-  orderId: string,
-): Promise<{ status: string; amountMinorUnits: number; captureId?: string }> {
+export async function getPlanOrder(orderId: string): Promise<PlanOrderStatus> {
   const token = await accessToken();
   const response = await fetch(`${baseUrl()}/v2/checkout/orders/${orderId}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -79,9 +165,7 @@ export async function getPlanOrder(
   return readOrderDetail((await response.json()) as OrderDetail);
 }
 
-export async function capturePlanOrder(
-  orderId: string,
-): Promise<{ status: string; amountMinorUnits: number; captureId?: string }> {
+export async function capturePlanOrder(orderId: string): Promise<PlanOrderStatus> {
   const existing = await getPlanOrder(orderId);
   if (existing.status === "COMPLETED") return existing;
   const token = await accessToken();

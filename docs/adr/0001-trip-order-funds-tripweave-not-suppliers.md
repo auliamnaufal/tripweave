@@ -1,3 +1,7 @@
+---
+status: partially superseded by ADR-0002 — see that ADR for live sandbox evidence that direct supplier payment is achievable for suppliers willing to share their own PayPal email, without partner approval. The reasoning below still holds for airlines (IATA BSP, unrelated to PayPal) and for any supplier unwilling/unable to share a PayPal account.
+---
+
 # Trip Order pays Tripweave, not the supplier directly
 
 **Context:** The product pitch was "traveller connects/tops up PayPal once, and the agent one-shot pays the airline and hotel directly from that." `docs/research/paypal-agent-oneshot-payment-mechanisms-2026-11-09.md` found no documented, non-partner-gated PayPal primitive that lets a third party debit a consumer's PayPal account at multiple arbitrary merchants from one authorization — Vault only lets the *same merchant* that vaulted a payment method re-charge the *same buyer*; multi-payee routing exists only under Complete Payments Platform, which is approved-partner-only.
