@@ -18,6 +18,10 @@ export type DealSummary = {
     platformsCompared: number;
     highestMinorUnits: number;
     savedMinorUnits: number;
+    /** Every platform's price for this exact item, cheapest first. */
+    options: { supplier: string; label: string; data: "live" | "simulated"; role: "bookable" | "deeplink"; costMinorUnits: number; terms: string | null; chosen: boolean }[];
+    /** The platform whose inventory this is, when a partner resells it (e.g. a LiteAPI hotel sold by a partner). */
+    sourceLabel: string | null;
   }[];
   savedMinorUnits: number;
   /** "Fly on X instead and the market fare is $Y less" tips, from metasearch data. */
@@ -51,9 +55,36 @@ export function summarizeDeal(
   const byKey = new Map(relevant.map((comparison) => [comparison.productKey, comparison]));
   const items = planOffers.map((offer) => {
     const comparison = offer.productKey ? byKey.get(offer.productKey) : undefined;
-    const bookablePrices = comparison?.options.filter((item) => item.bookable).map((item) => item.costMinorUnits) ?? [];
-    const highest = Math.max(offer.costMinorUnits, ...bookablePrices);
+    // Savings compare platforms, not fare classes: each platform's cheapest
+    // price for this product (computed below) is what "priciest" means.
+    const rawOptions = comparison?.options ?? [
+      { supplier: offer.supplier, offerId: offer.id, costMinorUnits: offer.costMinorUnits, bookable: true, cancellationTerms: offer.cancellationTerms },
+    ];
+    const allOptions = rawOptions.map((item) => {
+      const info = platformInfo(item.supplier);
+      return {
+        supplier: item.supplier,
+        label: info.label,
+        data: info.data,
+        role: info.role,
+        costMinorUnits: item.costMinorUnits,
+        terms: item.cancellationTerms,
+        chosen: item.offerId === offer.id,
+      };
+    });
+    // One row per platform: the chosen fare, or that platform's cheapest one.
+    const perPlatform = new Map<string, (typeof allOptions)[number]>();
+    for (const item of allOptions) {
+      const current = perPlatform.get(item.supplier);
+      if (!current || item.chosen || (!current.chosen && item.costMinorUnits < current.costMinorUnits)) perPlatform.set(item.supplier, item);
+    }
+    const options = [...perPlatform.values()].sort((a, b) => a.costMinorUnits - b.costMinorUnits);
+    const highest = Math.max(offer.costMinorUnits, ...options.filter((item) => item.role === "bookable").map((item) => item.costMinorUnits));
+    // Partner offers carry their source in the reference: "partner|source|…".
+    const source = offer.supplierRef.includes("|") ? offer.supplierRef.split("|")[1] : null;
     return {
+      options,
+      sourceLabel: source && source !== offer.supplier ? platformInfo(source).label : null,
       offerId: offer.id,
       title: offer.title,
       kind: offer.productKind,

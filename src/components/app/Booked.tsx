@@ -270,6 +270,11 @@ function BookedInner({ view, payment }: { view: AnyTripView; payment: LivePaymen
                 Back to checkout
               </Link>
             )}
+            {live && payment && state.done && !state.error && (
+              <Link href={`/tickets?order=${encodeURIComponent(payment.orderId)}`} className="btn btn-ember">
+                <Icon name="ticket" size={16} /> E-tickets &amp; QR codes
+              </Link>
+            )}
             <Link href="/trip" className="btn">
               View itinerary
               <span className="btn-arrow">

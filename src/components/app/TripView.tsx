@@ -298,7 +298,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 </span>
                 <h3>{view.hotel.name}</h3>
                 <p className="trip-stay-rating">
-                  <Icon name="star" size={14} /> {view.hotel.rating} · {view.hotel.reviews} reviews
+                  <Icon name="star" size={14} /> {view.hotel.rating}{view.hotel.reviews > 0 ? ` · ${view.hotel.reviews} reviews` : ""}
                 </p>
                 <ul>
                   {view.hotel.perks.map((p) => (

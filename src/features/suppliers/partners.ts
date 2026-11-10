@@ -114,8 +114,9 @@ export function createPartnerAdapter(profile: PartnerProfile, bases: Partial<Rec
       const checked = await base.reprice({ ...offer, id: baseId, supplier: baseSupplier, supplierRef: baseRef });
       if (checked.status === "unavailable") return checked;
       const costMinorUnits = minorUnits(Math.round(checked.offer.costMinorUnits * factorFor(profile, offer.productKey, pricing)));
-      const updated: TravelOffer = { ...offer, costMinorUnits, retrievedAt: checked.offer.retrievedAt, expiresAt: checked.offer.expiresAt };
-      return costMinorUnits === offer.costMinorUnits
+      const supplierRef = [profile.name, baseSupplier, baseId, checked.offer.supplierRef].join(SEP);
+      const updated: TravelOffer = { ...offer, supplierRef, costMinorUnits, retrievedAt: checked.offer.retrievedAt, expiresAt: checked.offer.expiresAt };
+      return costMinorUnits === offer.costMinorUnits && supplierRef === offer.supplierRef
         ? { status: "unchanged", offer: updated }
         : { status: "changed", offer: updated, previousMinorUnits: offer.costMinorUnits };
     },

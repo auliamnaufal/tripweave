@@ -127,6 +127,9 @@ export function SiteNav() {
             </li>
           ))}
         </ul>
+        <Link href={user ? "/account" : "/login"} className="mobile-menu-account" tabIndex={open ? 0 : -1}>
+          {user ? `Signed in as ${user.firstName} · Account` : "Sign in"}
+        </Link>
         <Link href="/plan" className="btn btn-ember" tabIndex={open ? 0 : -1}>
           Plan a trip
           <span className="btn-arrow">

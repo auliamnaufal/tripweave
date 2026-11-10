@@ -24,9 +24,11 @@ export async function repriceQuote(
   for (const [index, result] of results.entries()) {
     if (result.status === "unavailable") return { status: "unavailable", offerId: offers[index].id, reason: result.reason };
     if (result.offer.id !== offers[index].id) throw new Error(`Reprice answered for ${result.offer.id}, expected ${offers[index].id}.`);
-    if (result.status === "changed") changed = true;
+    // Only a different price needs the traveller's say; a refreshed reference at the same price doesn't.
+    if (result.status === "changed" && result.offer.costMinorUnits !== offers[index].costMinorUnits) changed = true;
     // Keep anything the quote added on top of the supplier's offer (e.g. a demo payee).
-    fresh.push({ ...offers[index], costMinorUnits: result.offer.costMinorUnits, retrievedAt: result.offer.retrievedAt, expiresAt: result.offer.expiresAt });
+    // The supplier may hand back a new reference (e.g. a re-searched hotel rate): book that one.
+    fresh.push({ ...offers[index], supplierRef: result.offer.supplierRef, costMinorUnits: result.offer.costMinorUnits, retrievedAt: result.offer.retrievedAt, expiresAt: result.offer.expiresAt });
   }
   return changed
     ? { status: "changed", offers: fresh, previousTotalMinorUnits: total(offers), totalMinorUnits: total(fresh) }

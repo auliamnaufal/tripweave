@@ -4,6 +4,7 @@ import { minorUnits, zonedDateTime } from "@/features/planner/types";
 import type { RepriceResult, SupplierAdapter } from "./adapter";
 import type { BookingResult } from "./booking";
 import { resolveAirport } from "./duffel";
+import { tripStays, type Stay } from "@/features/planner/itinerary";
 
 // LiteAPI (Nuitée): real hotel inventory with a full search → prebook → book
 // flow. With a sandbox key (sand_…) the booking is confirmed by LiteAPI but
@@ -59,17 +60,12 @@ function occupancies(travelers: number): { adults: number }[] {
   return Array.from({ length: rooms }, (_, i) => ({ adults: i < rooms - 1 ? 2 : travelers - 2 * (rooms - 1) }));
 }
 
-function stayDates(brief: TripBrief) {
-  const start = Date.parse(brief.travelWindow.startsAt);
-  const end = Date.parse(brief.travelWindow.endsAt);
-  // Same check-in/check-out shape as the synthetic stays: afternoon in, morning out.
-  const checkInMs = start + 15 * hourMs;
-  const checkOutMs = end - 10 * hourMs;
+function stayDates(stay: Stay) {
   return {
-    checkInMs,
-    checkOutMs,
-    checkin: new Date(checkInMs).toISOString().slice(0, 10),
-    checkout: new Date(checkOutMs).toISOString().slice(0, 10),
+    checkInMs: stay.checkInMs,
+    checkOutMs: stay.checkOutMs,
+    checkin: new Date(stay.checkInMs).toISOString().slice(0, 10),
+    checkout: new Date(stay.checkOutMs).toISOString().slice(0, 10),
   };
 }
 
@@ -79,14 +75,21 @@ function cancellationText(rate: Rate): string {
   return until ? `Free cancellation until ${until} GMT.` : "Refundable.";
 }
 
+/** One hotel search per stop of the trip, each with that stop's own dates. */
 export async function searchHotels(brief: TripBrief): Promise<TravelOffer[]> {
-  const destination = await resolveAirport(brief.destination.city);
-  if (!destination.country_code) throw new Error(`No country code for ${brief.destination.city}.`);
-  const qs = new URLSearchParams({ countryCode: destination.country_code, cityName: brief.destination.city, limit: String(HOTELS_PER_SEARCH) });
+  const stays = tripStays(brief);
+  const perStay = await Promise.all(stays.map((stay) => searchStay(brief, stay, stays.length > 1)));
+  return perStay.flat();
+}
+
+async function searchStay(brief: TripBrief, stay: Stay, multi: boolean): Promise<TravelOffer[]> {
+  const place = await resolveAirport(stay.city);
+  if (!place.country_code) throw new Error(`No country code for ${stay.city}.`);
+  const qs = new URLSearchParams({ countryCode: place.country_code, cityName: stay.city, limit: String(HOTELS_PER_SEARCH) });
   const hotels = ((await liteFetch(`${DATA}/data/hotels?${qs}`)) as { data?: Hotel[] }).data ?? [];
   if (hotels.length === 0) return [];
 
-  const { checkInMs, checkOutMs, checkin, checkout } = stayDates(brief);
+  const { checkInMs, checkOutMs, checkin, checkout } = stayDates(stay);
   const party = occupancies(brief.travelers);
   const rates =
     ((await liteFetch(`${DATA}/hotels/rates`, {
@@ -110,7 +113,7 @@ export async function searchHotels(brief: TripBrief): Promise<TravelOffer[]> {
     const total = room?.offerRetailRate ?? rate?.retailRate?.total?.[0];
     if (!hotel || !room?.offerId || !rate || !total || total.currency !== "USD" || !(total.amount > 0)) continue;
     offers.push({
-      id: `hotel-lite-${hotel.id}`,
+      id: multi ? `hotel-lite-s${stay.index}-${hotel.id}` : `hotel-lite-${hotel.id}`,
       supplier: "liteapi",
       supplierRef: `liteapi:${room.offerId}`,
       productKind: "hotel",
@@ -118,6 +121,7 @@ export async function searchHotels(brief: TripBrief): Promise<TravelOffer[]> {
       summary: [
         hotel.stars ? `${hotel.stars}★` : null,
         hotel.rating ? `rated ${hotel.rating}${hotel.reviewCount ? ` (${hotel.reviewCount} reviews)` : ""}` : null,
+        multi ? stay.city : null,
         hotel.address,
         `${rate.name ?? "Room"}${rate.boardName ? `, ${rate.boardName}` : ""}`,
         `${nights} night${nights === 1 ? "" : "s"}${party.length > 1 ? ` × ${party.length} rooms` : ""}`,
@@ -133,7 +137,7 @@ export async function searchHotels(brief: TripBrief): Promise<TravelOffer[]> {
       cancellationTerms: cancellationText(rate),
       synthetic: false,
       productKey: `hotel:liteapi-${hotel.id}@${checkin}_${checkout}_${party.map((o) => o.adults).join("-")}`,
-      marketKey: `hotel-market:${brief.destination.city.toLowerCase()}@${checkin}_${checkout}`,
+      marketKey: `hotel-market:${stay.city.toLowerCase()}@${checkin}_${checkout}`,
     });
   }
   return offers;
@@ -153,27 +157,61 @@ async function prebook(offer: TravelOffer): Promise<{ prebookId: string; price: 
 }
 
 /** Prebook is LiteAPI's own "is this still the price?" check. */
+/** LiteAPI's "the price moved, search again" answer to a prebook (not a sold-out room). */
+const PRICE_MOVED = 2001;
+
+/**
+ * Searches this one hotel again for the same dates and party, for when its
+ * locked rate moved. Returns the fresh offer (new offerId and price), or null.
+ */
+async function searchSameHotel(offer: TravelOffer): Promise<TravelOffer | null> {
+  const m = /^hotel:liteapi-(.+)@(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})_([\d-]+)$/.exec(offer.productKey ?? "");
+  if (!m) return null;
+  const [, hotelId, checkin, checkout, party] = m;
+  const rates =
+    ((await liteFetch(`${DATA}/hotels/rates`, {
+      hotelIds: [hotelId],
+      checkin,
+      checkout,
+      currency: "USD",
+      guestNationality: "US",
+      occupancies: party.split("-").map((adults) => ({ adults: Number(adults) })),
+      maxRatesPerHotel: 1,
+    })) as { data?: HotelRates[] }).data ?? [];
+  const room = rates[0]?.roomTypes?.[0];
+  const total = room?.offerRetailRate ?? room?.rates?.[0]?.retailRate?.total?.[0];
+  if (!room?.offerId || !total || total.currency !== "USD" || !(total.amount > 0)) return null;
+  return { ...offer, supplierRef: `liteapi:${room.offerId}`, costMinorUnits: minorUnits(Math.round(total.amount * 100)) };
+}
+
 export async function repriceHotel(offer: TravelOffer): Promise<RepriceResult> {
   let checked: Awaited<ReturnType<typeof prebook>>;
+  let current = offer;
   try {
     checked = await prebook(offer);
   } catch (error) {
-    if (error instanceof LiteApiError && error.status >= 400 && error.status < 500) {
+    if (!(error instanceof LiteApiError) || error.status < 400 || error.status >= 500) throw error;
+    // The rate moved: get today's rate for the same room and check that one.
+    const fresh = error.code === PRICE_MOVED ? await searchSameHotel(offer).catch(() => null) : null;
+    if (!fresh) return { status: "unavailable", reason: "This room is no longer available at this rate." };
+    try {
+      checked = await prebook(fresh);
+      current = fresh;
+    } catch {
       return { status: "unavailable", reason: "This room is no longer available at this rate." };
     }
-    throw error;
   }
   if (checked.currency !== "USD") return { status: "unavailable", reason: "This rate is no longer offered in USD." };
   const costMinorUnits = minorUnits(Math.round(checked.price * 100));
   const retrievedAt = new Date().toISOString();
-  const updated: TravelOffer = { ...offer, costMinorUnits, retrievedAt, expiresAt: new Date(Date.parse(retrievedAt) + 15 * 60_000).toISOString() };
-  return costMinorUnits === offer.costMinorUnits
+  const updated: TravelOffer = { ...current, costMinorUnits, retrievedAt, expiresAt: new Date(Date.parse(retrievedAt) + 15 * 60_000).toISOString() };
+  return costMinorUnits === offer.costMinorUnits && current.supplierRef === offer.supplierRef
     ? { status: "unchanged", offer: updated }
     : { status: "changed", offer: updated, previousMinorUnits: offer.costMinorUnits };
 }
 
-// The traveller's identity isn't collected in this demo (see README), so the
-// booking holder is a fixed placeholder on a reserved example domain.
+// Booked under the lead traveller from checkout; this placeholder (on a
+// reserved example domain) fills only what checkout didn't ask for.
 const DEMO_GUEST = { firstName: "Demo", lastName: "Traveller", email: "guest@tripweave.example", phone: "+15550100" };
 
 /** Rooms in the offer, from the occupancy suffix of its product key (`…_2-1` is two rooms). */
@@ -187,22 +225,28 @@ function clientReference(idempotencyKey: string): string {
   return idempotencyKey.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 100);
 }
 
-export async function bookHotel(offer: TravelOffer, idempotencyKey: string, forceFail: boolean): Promise<BookingResult> {
+export async function bookHotel(
+  offer: TravelOffer,
+  idempotencyKey: string,
+  forceFail: boolean,
+  lead?: { firstName: string; lastName: string; email?: string },
+): Promise<BookingResult> {
   if (forceFail) return { offerId: offer.id, status: "failed", reason: "Price or availability changed before booking (simulated)." };
   const reference = clientReference(idempotencyKey);
   const { prebookId } = await prebook(offer);
+  const guest = lead ? { ...DEMO_GUEST, firstName: lead.firstName, lastName: lead.lastName, ...(lead.email ? { email: lead.email } : {}) } : DEMO_GUEST;
   try {
     const body = (await liteFetch(`${BOOK}/rates/book`, {
       prebookId,
       clientReference: reference,
-      holder: DEMO_GUEST,
+      holder: guest,
       payment: { method: "ACC_CREDIT_CARD" },
       // LiteAPI wants one lead guest per room (occupancy).
       guests: Array.from({ length: roomCount(offer) }, (_, index) => ({
         occupancyNumber: index + 1,
-        firstName: DEMO_GUEST.firstName,
-        lastName: DEMO_GUEST.lastName,
-        email: DEMO_GUEST.email,
+        firstName: guest.firstName,
+        lastName: guest.lastName,
+        email: guest.email,
       })),
     })) as { data?: { bookingId?: string; status?: string } };
     if (body.data?.status !== "CONFIRMED" || !body.data.bookingId) {
@@ -225,5 +269,5 @@ export const liteApiAdapter: SupplierAdapter = {
   isConfigured: () => Boolean(process.env.LITEAPI_KEY && process.env.DUFFEL_API_KEY),
   search: async (brief, kind) => (kind === "hotel" ? searchHotels(brief) : []),
   reprice: repriceHotel,
-  book: (offer, context) => bookHotel(offer, context.idempotencyKey, context.forceFail === true),
+  book: (offer, context) => bookHotel(offer, context.idempotencyKey, context.forceFail === true, context.leadTraveller),
 };

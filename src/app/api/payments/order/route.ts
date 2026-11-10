@@ -1,7 +1,36 @@
 import { z } from "zod";
 import { createPlanOrder } from "@/features/payments/paypal";
 import { canAccess, demoModeEnabled, quoteTotal, requestIds, withDemoPayee } from "@/features/quotes/quote";
-import { getQuote, markOrdered, saveQuote } from "@/features/quotes/quoteStore";
+import { getQuote, getQuoteSnapshot, markOrdered, saveQuote } from "@/features/quotes/quoteStore";
+import { alternativesFor } from "@/features/suppliers/alternatives";
+import { repriceOffer } from "@/features/suppliers/registry";
+import { platformInfo } from "@/features/suppliers/platforms";
+import type { TravelOffer } from "@/features/planner/travelOffer";
+
+/** The next confirmable option for an item that's gone, from the quote's own search snapshot. */
+async function recoverUnavailable(
+  offers: readonly TravelOffer[],
+  quoteId: string,
+  goneOfferId: string,
+): Promise<{ offers: TravelOffer[]; note: string } | null> {
+  const snapshot = await getQuoteSnapshot(quoteId).catch(() => null);
+  const gone = offers.find((offer) => offer.id === goneOfferId);
+  if (!snapshot || !gone) return null;
+  const slot = alternativesFor([gone], snapshot.catalog, 8)[0];
+  const candidates = slot?.options.filter((option) => option.offerId !== goneOfferId).slice(0, 4) ?? [];
+  for (const candidate of candidates) {
+    const offer = snapshot.catalog.find((item) => item.id === candidate.offerId);
+    if (!offer) continue;
+    const checked = await repriceOffer(offer).catch(() => null);
+    if (!checked || checked.status === "unavailable") continue;
+    const replacement = { ...offer, supplierRef: checked.offer.supplierRef, costMinorUnits: checked.offer.costMinorUnits, retrievedAt: checked.offer.retrievedAt, expiresAt: checked.offer.expiresAt };
+    return {
+      offers: offers.map((item) => (item.id === goneOfferId ? replacement : item)),
+      note: `${gone.title} is no longer available, so I switched to ${replacement.title} via ${platformInfo(replacement.supplier).label};`,
+    };
+  }
+  return null;
+}
 import { authedUser } from "@/lib/supabase/authedUser";
 import { assertBookable } from "@/features/suppliers/registry";
 import { repriceQuote, type QuoteRepricing } from "@/features/quotes/reprice";
@@ -19,6 +48,18 @@ const orderRequestSchema = z.object({
   quoteId: z.string().uuid(),
   // DEMO_MODE only: pay one non-flight offer straight to a sandbox account.
   demoDirectPayee: z.object({ offerId: z.string().min(1), email: z.string().email() }).optional(),
+  // Names from the checkout form. Descriptive: never affects the price.
+  travellers: z
+    .array(
+      z.object({
+        firstName: z.string().trim().min(1).max(60),
+        lastName: z.string().trim().min(1).max(60),
+        email: z.string().trim().email().max(120).optional(),
+      }),
+    )
+    .min(1)
+    .max(9)
+    .optional(),
 });
 
 /**
@@ -77,21 +118,31 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
+    let replacementNote: string | null = null;
     if (repricing.status === "unavailable") {
-      return Response.json(
-        { error: `${repricing.reason} Plan the trip again to get current options.`, code: "quote-unavailable", offerId: repricing.offerId },
-        { status: 409 },
-      );
+      // Recover instead of dead-ending: try the next options for the same
+      // flight leg or stay from this search, cheapest first, and offer the
+      // traveller the first one that its supplier still confirms.
+      const recovered = await recoverUnavailable(quote.offers, quote.id, repricing.offerId);
+      if (!recovered) {
+        return Response.json(
+          { error: `${repricing.reason} Plan the trip again to get current options.`, code: "quote-unavailable", offerId: repricing.offerId },
+          { status: 409 },
+        );
+      }
+      replacementNote = recovered.note;
+      repricing = { status: "changed", offers: recovered.offers, previousTotalMinorUnits: quoteTotal(quote.offers), totalMinorUnits: quoteTotal(recovered.offers) };
     }
     if (repricing.status === "changed") {
       // Never charge a new price silently: save it as a fresh quote and let the
       // traveller approve the new total first.
       const brief = parseTripBrief(quote.brief);
       const plan = buildItinerary(brief, repricing.offers);
-      const newQuoteId = await saveQuote({ userId: quote.userId, brief, offers: plan.offers });
+      const snapshot = await getQuoteSnapshot(quote.id).catch(() => null);
+      const newQuoteId = await saveQuote({ userId: quote.userId, brief, offers: plan.offers, ...(snapshot ? { catalog: snapshot.catalog, insights: snapshot.insights } : {}) });
       return Response.json(
         {
-          error: `Prices changed since you planned: the total is now ${usd(repricing.totalMinorUnits)} (was ${usd(repricing.previousTotalMinorUnits)}).`,
+          error: `${replacementNote ? `${replacementNote} ` : "Prices changed since you planned: "}the total is now ${usd(repricing.totalMinorUnits)} (was ${usd(repricing.previousTotalMinorUnits)}).`,
           code: "quote-repriced",
           quoteId: newQuoteId,
           plan: itineraryPlanSchema.parse(plan),
@@ -115,7 +166,7 @@ export async function POST(request: Request) {
       customId: quote.id,
       returnUrls: returnUrls(request),
     });
-    const won = await markOrdered(quote.id, { paypalOrderId: order.id, approveUrl: order.approveUrl, offers });
+    const won = await markOrdered(quote.id, { paypalOrderId: order.id, approveUrl: order.approveUrl, offers, travellers: input.travellers });
     if (!won) {
       // A concurrent request ordered first. PayPal-Request-Id made both calls
       // return the same order, so the stored one is the one to hand back.

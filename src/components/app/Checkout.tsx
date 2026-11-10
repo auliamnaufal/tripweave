@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
-import { createOrder, OrderError } from "@/features/live/client";
+import { createOrder, OrderError, type TravellerName } from "@/features/live/client";
 import { livePaymentStore, livePlanStore } from "@/features/live/liveStore";
 import { isPayPalReturnMessage } from "@/features/live/paypalReturn";
 import { SandboxBuyer } from "@/components/app/SandboxBuyer";
@@ -40,6 +40,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
   const docsHeading = useRef<HTMLHeadingElement>(null);
   const modalCard = useRef<HTMLDivElement>(null);
   const payButton = useRef<HTMLButtonElement>(null);
+  const travellerCard = useRef<HTMLElement>(null);
   const people = `${view.travelers} ${view.travelers === 1 ? "traveller" : "travellers"}`;
 
   // Modal: move focus in, close on Escape, give focus back to the pay button.
@@ -107,13 +108,28 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
     { scope: root },
   );
 
+  /** The names typed into the traveller card; blank extra travellers become "Guest N". */
+  function readTravellers(): TravellerName[] {
+    const value = (name: string) => travellerCard.current?.querySelector<HTMLInputElement>(`input[name="${name}"]`)?.value.trim() ?? "";
+    const email = value("email");
+    const people: TravellerName[] = [];
+    for (let i = 1; i <= view.travelers; i++) {
+      const full = value(i === 1 ? "name" : `traveller-${i}`) || (i === 1 ? user?.name ?? "" : "");
+      const parts = full.split(/s+/).filter(Boolean);
+      const firstName = parts.length > 1 ? parts.slice(0, -1).join(" ") : parts[0] ?? "Guest";
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0] ?? String(i);
+      people.push({ firstName, lastName, ...(i === 1 && email.includes("@") ? { email } : {}) });
+    }
+    return people;
+  }
+
   async function payLive() {
     if (!isLive(view)) return;
     // Open the window during the click so popup blockers allow it, then point it at PayPal.
     const popup = window.open("", "paypal-approve", "width=520,height=720");
     setPay({ phase: "creating" });
     try {
-      const order = await createOrder(view.quoteId);
+      const order = await createOrder(view.quoteId, readTravellers());
       livePaymentStore.set({ ...order, planRetrievedAt: view.offers[0]?.retrievedAt ?? "" });
       if (popup) popup.location.href = order.approveUrl;
       setPay({ phase: "approve", approveUrl: order.approveUrl });
@@ -174,8 +190,8 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
               </div>
             </article>
 
-            <section className="co-card">
-              <h2>Lead traveller</h2>
+            <section className="co-card" ref={travellerCard}>
+              <h2>Travellers</h2>
               <div className="co-fields">
                 <label>
                   <span>Full name</span>
@@ -185,12 +201,12 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                   <span>Email for confirmations</span>
                   <input type="email" name="email" autoComplete="email" defaultValue={user?.email ?? ""} placeholder="you@example.com" />
                 </label>
-                {view.travelers > 1 && (
-                  <label>
-                    <span>Second traveller</span>
-                    <input name="traveller-2" autoComplete="off" placeholder="Daniel Reyes" />
+                {Array.from({ length: Math.max(0, view.travelers - 1) }, (_, k) => (
+                  <label key={k}>
+                    <span>Traveller {k + 2} (as on passport)</span>
+                    <input name={`traveller-${k + 2}`} autoComplete="off" placeholder={k === 0 ? "Daniel Reyes" : "Full name"} />
                   </label>
-                )}
+                ))}
                 <label>
                   <span>Phone (optional)</span>
                   <input type="tel" name="phone" autoComplete="tel" placeholder="+1 555 010 0199" />

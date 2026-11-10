@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon } from "@/components/brand/Icon";
 import { DEMO_USER, historyStore, userStore } from "@/features/ui-mock/tripStore";
+import { SignedInRedirect } from "@/components/landing/SignedInRedirect";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 import { createClient } from "@/lib/supabase/client";
 import { hydrateFromServer } from "@/features/db/sync";
@@ -80,6 +81,8 @@ export function Login() {
 
   return (
     <div ref={root} className="lg">
+      {/* Already signed in: there's nothing to do here, carry on to where they were going. */}
+      <SignedInRedirect to={next} />
       <aside className="lg-photo">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/m-tent.webp" alt="A lit tent in an alpine meadow at blue hour" />

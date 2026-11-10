@@ -244,7 +244,8 @@ export async function POST(request: Request) {
           throw new Error("Capture succeeded but returned no capture id to refund against.");
         }
 
-        const bookingSteps = runBookings(needsBooking, { keyPrefix: paid.id, forceFailureOfferId });
+        const lead = paid.travellers?.[0];
+        const bookingSteps = runBookings(needsBooking, { keyPrefix: paid.id, forceFailureOfferId, ...(lead ? { leadTraveller: lead } : {}) });
         let step = await bookingSteps.next();
         while (!step.done) {
           emit(step.value);

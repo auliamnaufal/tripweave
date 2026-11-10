@@ -7,6 +7,8 @@ export const plannerSystemPrompt = [
   "3. Call check_market to see recent metasearch fares on the same routes and the cheapest nearby dates. You can't change the traveler's dates, but if a nearby date is clearly cheaper, mention it as a tip.",
   "4. Call build_itinerary with your selection, adjust if it's over budget or has conflicts, and call it again until it fits or no better selection exists.",
   "Pick one outbound flight, one return flight, one hotel for the stay, and activities that fit the preferences without schedule conflicts.",
+  "If the brief has stops (a multi-city trip), pick one flight per leg in order (offer ids name the leg: outbound, leg1, leg2…, return), each departing after the previous one lands (long-haul flights can land the next day), and one hotel per stop (its summary names the city).",
+  "If the brief has dayPlans, include the activity matching each wish on its day; those are what the traveller explicitly asked for.",
   "Never invent prices, availability, platforms, or booking state. Every number comes only from tool results.",
   "Never change totals, feasibility, or constraints. build_itinerary is the only source of totals and feasibility.",
   "If a search returns no offers or the brief is under-specified, say so in the note instead of inventing data.",

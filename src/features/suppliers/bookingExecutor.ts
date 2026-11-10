@@ -1,5 +1,5 @@
 import type { TravelOffer } from "@/features/planner/travelOffer";
-import type { ProductKind } from "./adapter";
+import type { BookingContext, ProductKind } from "./adapter";
 import type { BookingResult } from "./booking";
 import { bookOffer as registryBook } from "./registry";
 
@@ -32,7 +32,8 @@ export type BookingRunOptions = {
   /** Prefix for each booking's idempotency key: `${keyPrefix}:${offer.id}`. */
   keyPrefix: string;
   forceFailureOfferId?: string;
-  book?: (offer: TravelOffer, context: { idempotencyKey: string; forceFail?: boolean }) => Promise<BookingResult>;
+  leadTraveller?: { firstName: string; lastName: string; email?: string };
+  book?: (offer: TravelOffer, context: BookingContext) => Promise<BookingResult>;
 };
 
 /** An adapter's answer, checked: it must be about this offer and be a well-formed result. */
@@ -66,6 +67,7 @@ export async function* runBookings(
         await book(offer, {
           idempotencyKey: `${options.keyPrefix}:${offer.id}`,
           forceFail: offer.id === options.forceFailureOfferId,
+          ...(options.leadTraveller ? { leadTraveller: options.leadTraveller } : {}),
         }),
       );
     } catch (error) {

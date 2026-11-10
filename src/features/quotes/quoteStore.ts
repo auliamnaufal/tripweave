@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { toTravelOffer, travelOfferSchema, type TravelOffer } from "@/features/planner/travelOffer";
 import type { TripBrief } from "@/features/planner/tripBrief";
-import { quoteExpiry, quoteTotal, type BookingRecord, type BookingStatus, type PlanQuote, type QuoteStatus } from "./quote";
+import { quoteExpiry, quoteTotal, type BookingRecord, type BookingStatus, type PlanQuote, type QuoteStatus, type Traveller } from "./quote";
 
 // Persistence for plan quotes and bookings. Server-only: both tables have RLS
 // on with no policies, so only the secret-key admin client can reach them.
@@ -17,9 +17,10 @@ type QuoteRow = {
   approve_url: string | null;
   expires_at: string;
   brief: unknown;
+  travellers: Traveller[] | null;
 };
 
-const QUOTE_COLUMNS = "id, user_id, brief, offers, total_minor_units, status, paypal_order_id, approve_url, expires_at";
+const QUOTE_COLUMNS = "id, user_id, brief, offers, travellers, total_minor_units, status, paypal_order_id, approve_url, expires_at";
 
 // Offers are re-validated on the way out too: the database is a boundary.
 const offersSchema = z.array(travelOfferSchema).min(1);
@@ -35,6 +36,7 @@ function toQuote(row: QuoteRow): PlanQuote {
     approveUrl: row.approve_url,
     expiresAt: row.expires_at,
     brief: row.brief,
+    travellers: row.travellers ?? undefined,
   };
 }
 
@@ -46,6 +48,9 @@ export async function saveQuote(input: {
   userId: string | null;
   brief: TripBrief;
   offers: readonly TravelOffer[];
+  /** The full catalog the plan was chosen from, so options can be swapped later without searching again. */
+  catalog?: readonly TravelOffer[];
+  insights?: unknown;
 }): Promise<string> {
   const { data, error } = await createAdminClient()
     .from("plan_quotes")
@@ -55,11 +60,21 @@ export async function saveQuote(input: {
       offers: input.offers,
       total_minor_units: quoteTotal(input.offers),
       expires_at: quoteExpiry(input.offers),
+      ...(input.catalog ? { catalog: input.catalog } : {}),
+      ...(input.insights ? { insights: input.insights } : {}),
     })
     .select("id")
     .single();
   if (error || !data) fail("insert", error);
   return data.id as string;
+}
+
+/** The search snapshot saved with a quote (see saveQuote). Loaded only when swapping options. */
+export async function getQuoteSnapshot(id: string): Promise<{ catalog: TravelOffer[]; insights: unknown } | null> {
+  const { data, error } = await createAdminClient().from("plan_quotes").select("catalog, insights").eq("id", id).maybeSingle();
+  if (error) fail("snapshot lookup", error);
+  if (!data?.catalog) return null;
+  return { catalog: offersSchema.parse(data.catalog).map(toTravelOffer), insights: data.insights ?? null };
 }
 
 export async function getQuote(id: string): Promise<PlanQuote | null> {
@@ -81,7 +96,7 @@ export async function getQuoteByOrderId(paypalOrderId: string): Promise<PlanQuot
 /** quoted -> ordered. Returns false if another request already ordered it. */
 export async function markOrdered(
   id: string,
-  order: { paypalOrderId: string; approveUrl: string; offers: readonly TravelOffer[] },
+  order: { paypalOrderId: string; approveUrl: string; offers: readonly TravelOffer[]; travellers?: readonly Traveller[] },
 ): Promise<boolean> {
   const { data, error } = await createAdminClient()
     .from("plan_quotes")
@@ -90,6 +105,7 @@ export async function markOrdered(
       paypal_order_id: order.paypalOrderId,
       approve_url: order.approveUrl,
       offers: order.offers,
+      ...(order.travellers ? { travellers: order.travellers } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

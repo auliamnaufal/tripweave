@@ -1,6 +1,7 @@
 import type { TravelOfferView } from "@/features/planner/travelOffer";
 import type { DealSummary } from "@/features/suppliers/deal";
-import { getDestination, type DayItem, type Plan } from "@/features/ui-mock/destinations";
+import { platformInfo } from "@/features/suppliers/platforms";
+import { getDestination, registerCustomDestination, type DayItem, type Plan } from "@/features/ui-mock/destinations";
 import { planView, type PlanView } from "@/features/ui-mock/planView";
 import type { LivePlan } from "./liveStore";
 
@@ -50,24 +51,27 @@ function activityCatalogId(offerId: string): string {
 }
 
 export function liveView(live: LivePlan): LiveView {
+  if (live.place) registerCustomDestination(live.place);
   const base = planView(live.prefs);
   const dest = getDestination(live.prefs.destId);
   const offers = live.plan.offers;
   const flights = offers.filter((o) => o.productKind === "flight").sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-  const hotelOffer = offers.find((o) => o.productKind === "hotel");
+  const hotelOffers = offers.filter((o) => o.productKind === "hotel").sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+  const hotelOffer = hotelOffers[0];
   const activityOffers = offers.filter((o) => o.productKind === "activity");
 
   const flightRows = flights.map((f, i) => {
     const p = flightParts(f);
     return {
       id: f.id,
-      date: i === 0 ? "Outbound" : "Return",
+      date: flights.length <= 2 ? (i === 0 ? "Outbound" : "Return") : i === 0 ? "Outbound" : i === flights.length - 1 ? "Return" : `Flight ${i + 1}`,
       depart: localTime(f.startsAt),
       arrive: localTime(f.endsAt),
       from: p.from,
       to: p.to,
       airline: p.airline,
-      code: f.synthetic ? "Sample fare" : "Live fare",
+      // Name the platform it's bought from; only a true sample fare says so.
+      code: f.supplier === "synthetic" ? "Sample fare" : `via ${platformInfo(f.supplier).label}`,
       duration: duration(f.startsAt, f.endsAt),
       stops: p.stops,
       price: usdFromMinor(f.costMinorUnits),
@@ -75,16 +79,18 @@ export function liveView(live: LivePlan): LiveView {
   });
 
   const catalogHotel = hotelOffer ? dest.hotels.find((h) => `hotel-${h.id}` === hotelOffer.id) : undefined;
-  const nights = hotelOffer ? Math.max(1, Math.round((Date.parse(hotelOffer.endsAt) - Date.parse(hotelOffer.startsAt)) / 86_400_000)) : live.prefs.nights;
+  const nightsOf = (o: { startsAt: string; endsAt: string }) => Math.max(1, Math.round((Date.parse(o.endsAt) - Date.parse(o.startsAt)) / 86_400_000));
+  const nights = hotelOffers.length ? hotelOffers.reduce((sum, o) => sum + nightsOf(o), 0) : live.prefs.nights;
   const hotel = hotelOffer
     ? {
-        name: hotelOffer.title,
-        area: catalogHotel?.area ?? live.brief.destination.city,
+        // A multi-city trip has a stay per stop: list them all, total the price.
+        name: hotelOffers.map((o) => o.title).join(" + "),
+        area: hotelOffers.length > 1 && live.place ? live.place.route.join(" → ") : catalogHotel?.area ?? live.brief.destination.city,
         nights,
         rating: catalogHotel?.rating ?? 4.5,
         reviews: catalogHotel?.reviews ?? 0,
         image: catalogHotel?.image ?? "/images/h-book.webp",
-        price: usdFromMinor(hotelOffer.costMinorUnits),
+        price: usdFromMinor(hotelOffers.reduce((sum, o) => sum + o.costMinorUnits, 0)),
         perks: catalogHotel?.perks ?? [hotelOffer.cancellationTerms ?? "Sample stay"],
       }
     : { ...base.hotel, name: "No stay selected", price: 0, perks: ["The agent did not pick a stay for this plan"] };
@@ -112,7 +118,9 @@ export function liveView(live: LivePlan): LiveView {
         note: o.productKind === "flight" ? `${flightParts(o).airline} · ${duration(o.startsAt, o.endsAt)}` : o.summary.split(". ")[0],
       }));
     const act = d.offers.find((o) => o.productKind === "activity");
-    const title = i === 0 ? "Arrive and settle in" : i === live.plan.days.length - 1 && d.offers.some((o) => o.productKind === "flight") ? "Fly home" : act ? act.title : "Free day";
+    // What the traveller asked for that day leads the day's title.
+    const wish = live.brief.dayPlans?.find((plan) => plan.day === i + 1)?.wish;
+    const title = wish ? wish.charAt(0).toUpperCase() + wish.slice(1) : i === 0 ? "Arrive and settle in" : i === live.plan.days.length - 1 && d.offers.some((o) => o.productKind === "flight") ? "Fly home" : act ? act.title : "Free day";
     if (items.length === 0) items.push({ time: "10:00", kind: "free", title: "Nothing booked", note: "Left open on purpose" });
     return { day: i + 1, date: dayLabel(d.date), title, items };
   });
@@ -132,7 +140,8 @@ export function liveView(live: LivePlan): LiveView {
     quoteId: live.quoteId,
     deal: live.deal,
     total: usdFromMinor(live.plan.totalCostMinorUnits),
-    title: `${nights} nights in ${dest.name}`,
+    title: live.place ? `${nights} nights · ${live.place.route.join(" → ")}` : `${nights} nights in ${dest.name}`,
+    place: live.place ? `${live.place.route.join(", ")}, ${live.place.country}` : base.place,
     dates: `${fmt(start)} – ${fmt(end)}`,
     travelers: live.brief.travelers,
     budget: usdFromMinor(live.brief.hardBudget.amountMinorUnits),

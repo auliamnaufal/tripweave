@@ -1,0 +1,204 @@
+.tk-page {
+  min-height: 100vh;
+  background: var(--paper);
+}
+
+.tk-wrap {
+  padding-block: 32px 64px;
+  display: grid;
+  gap: 20px;
+  max-width: 880px;
+}
+
+.tk-kicker {
+  margin: 0 0 6px;
+  font: 600 0.72rem/1 var(--font-mono-stack);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ember-deep);
+}
+
+.tk-pagehead h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.tk-sub,
+.tk-empty,
+.tk-fineprint {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+}
+
+.tk-fineprint {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.tk-list {
+  display: grid;
+  gap: 16px;
+}
+
+.tk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.tk.is-void {
+  opacity: 0.72;
+}
+
+.tk-main {
+  padding: 18px 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.tk-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tk-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 0.72rem/1 var(--font-mono-stack);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.tk-platform {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tk-platform small {
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.tk-route {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.tk-route > div:last-child {
+  text-align: right;
+}
+
+.tk-route b {
+  display: block;
+  font-size: 2rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.tk-route small,
+.tk-title small {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.tk-route svg {
+  color: var(--ember);
+}
+
+.tk-title b {
+  display: block;
+  font-size: 1.15rem;
+  color: var(--ink);
+}
+
+.tk-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px 16px;
+}
+
+.tk-facts dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+.tk-facts dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.tk-mono {
+  font-family: var(--font-mono-stack);
+}
+
+.tk-void-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ember-deep);
+}
+
+/* Perforated stub with the QR code */
+.tk-stub {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+  background: var(--paper-2);
+  border-left: 2px dashed var(--line-strong);
+}
+
+.tk-stub small {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.tk-qr {
+  width: 120px;
+  height: 120px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.tk-qr.is-empty {
+  display: block;
+  background: repeating-linear-gradient(45deg, var(--paper-3), var(--paper-3) 6px, var(--paper-2) 6px, var(--paper-2) 12px);
+}
+
+@media (max-width: 600px) {
+  .tk {
+    grid-template-columns: 1fr;
+  }
+
+  .tk-stub {
+    border-left: 0;
+    border-top: 2px dashed var(--line-strong);
+    grid-auto-flow: column;
+    justify-content: start;
+    gap: 14px;
+  }
+
+  .tk-route b {
+    font-size: 1.6rem;
+  }
+}

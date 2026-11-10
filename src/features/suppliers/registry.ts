@@ -1,6 +1,6 @@
 import type { TripBrief } from "@/features/planner/tripBrief";
 import { toTravelOffer, travelOfferSchema, type TravelOffer } from "@/features/planner/travelOffer";
-import type { ProductKind, RepriceResult, SupplierAdapter } from "./adapter";
+import type { BookingContext, ProductKind, RepriceResult, SupplierAdapter } from "./adapter";
 import type { BookingResult } from "./booking";
 import { compareOffers, marketBenchmarks, type MarketBenchmark, type ProductComparison } from "./compare";
 import { duffelAdapter } from "./duffel";
@@ -245,7 +245,7 @@ export function repriceOffer(offer: TravelOffer, config?: RegistryConfig): Promi
 
 export function bookOffer(
   offer: TravelOffer,
-  context: { idempotencyKey: string; forceFail?: boolean },
+  context: BookingContext,
   config?: RegistryConfig,
 ): Promise<BookingResult> {
   return bookableAdapterFor(offer, config).book(offer, context);

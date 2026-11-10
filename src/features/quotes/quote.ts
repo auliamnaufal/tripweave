@@ -18,7 +18,19 @@ export type PlanQuote = {
   expiresAt: string;
   /** The TripBrief the quote was priced for, as stored. Parse before use. */
   brief?: unknown;
+  /** Names entered at checkout; suppliers book under them and tickets print them. */
+  travellers?: Traveller[];
 };
+
+export type Traveller = { firstName: string; lastName: string; email?: string };
+
+/** "Mara Okafor" → { firstName: "Mara", lastName: "Okafor" }; a single word becomes both. */
+export function splitName(full: string): { firstName: string; lastName: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "Guest", lastName: "Traveller" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: parts[0] };
+  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
+}
 
 export type BookingStatus = "pending" | "booked" | "failed" | "paid_direct";
 

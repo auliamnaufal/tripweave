@@ -173,7 +173,6 @@
 
 @media (max-width: 960px) {
   .site-nav-links,
-  .site-nav-signin,
   .site-nav-user span {
     display: none;
   }
@@ -185,6 +184,10 @@
   .site-nav-cta {
     display: none;
   }
+}
+.mobile-menu-account {
+  color: var(--on-dark-soft);
+  font-size: 16px;
 }
 
 /* ───────────── Hero ───────────── */

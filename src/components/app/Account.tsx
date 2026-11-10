@@ -21,7 +21,9 @@ import {
   useSaved,
   useTripPrefs,
   useUser,
+  userStore,
 } from "@/features/ui-mock/tripStore";
+import { AirportPicker } from "@/components/app/AirportPicker";
 import { signOut as supabaseSignOut, toggleSaved } from "@/features/db/sync";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 
@@ -80,6 +82,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
   const [picked, setPicked] = useState<string[]>(prefs.vibes.length ? prefs.vibes : ["Slow mornings", "Food first"]);
   const [diet, setDiet] = useState("No restrictions");
   const [seat, setSeat] = useState<"Window" | "Aisle">("Window");
+  const [homeAirport, setHomeAirport] = useState(user?.homeAirport ?? "San Francisco (SFO)");
   const [savedNote, setSavedNote] = useState(false);
   const [toggles, setToggles] = useState({ booking: true, price: true, tips: false, newsletter: true });
 
@@ -305,6 +308,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
               className="ac-form"
               onSubmit={(e) => {
                 e.preventDefault();
+                // Saved for real: the planner flies from here unless a request names another origin.
+                if (user && homeAirport.trim()) userStore.set({ ...user, homeAirport: homeAirport.trim() });
                 setSavedNote(true);
                 setTimeout(() => setSavedNote(false), 2200);
               }}
@@ -324,13 +329,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
               <div className="ac-row">
                 <label className="ac-input">
                   <span>Home airport</span>
-                  <select defaultValue="SFO">
-                    <option value="SFO">San Francisco (SFO)</option>
-                    <option value="JFK">New York (JFK)</option>
-                    <option value="LHR">London (LHR)</option>
-                    <option value="SIN">Singapore (SIN)</option>
-                    <option value="CGK">Jakarta (CGK)</option>
-                  </select>
+                  <AirportPicker name="home-airport" value={homeAirport} onChange={setHomeAirport} />
                 </label>
                 <label className="ac-input">
                   <span>Usual budget per trip</span>

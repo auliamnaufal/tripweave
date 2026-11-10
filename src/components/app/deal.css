@@ -239,3 +239,298 @@
   outline: 2px solid var(--ember);
   outline-offset: 2px;
 }
+
+/* Per-item deal cards */
+.deal-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.deal-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  display: grid;
+  gap: 6px;
+}
+
+.deal-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.deal-card-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 0.7rem/1 var(--font-mono-stack);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.deal-card-price {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.deal-card-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.deal-card-best {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+
+.deal-card-best b {
+  color: var(--ink);
+}
+
+.deal-card-saved {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--forest-700) 12%, transparent);
+  color: var(--forest-700);
+}
+
+.deal-card-source {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
+.deal-card-options {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deal-card-options li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.deal-card-options li.is-chosen {
+  border-color: var(--forest-700);
+  color: var(--ink);
+}
+
+.deal-opt-price {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.deal-card-options li:not(.is-chosen) .deal-opt-price {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-faint);
+}
+
+.deal-opt-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--forest-700);
+}
+
+/* Platform monogram */
+.pmark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font: 700 0.66rem/1 var(--font-sans-stack);
+  letter-spacing: 0.02em;
+  color: var(--surface);
+  background: var(--forest-700);
+}
+
+.pmark.is-small {
+  width: 20px;
+  height: 20px;
+  font-size: 0.56rem;
+}
+
+.pmark.is-ember { background: var(--ember-deep); }
+.pmark.is-sky { background: #4f7286; }
+.pmark.is-sand { background: #8a6d3f; }
+.pmark.is-moss { background: var(--forest-500); }
+.pmark.is-ink { background: var(--ink); }
+
+/* Simulated partners get a dashed ring so they never pass for a real brand. */
+.pmark.is-simulated {
+  outline: 1.5px dashed var(--ink-faint);
+  outline-offset: 1.5px;
+}
+
+.deal-chip {
+  align-items: center;
+}
+
+/* Live options (swap a flight leg or stay) */
+.lo {
+  display: grid;
+  gap: 14px;
+}
+
+.lo-slot {
+  display: grid;
+  gap: 8px;
+}
+
+.lo-count {
+  margin-left: auto;
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+.lo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.lo-opt {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.lo-opt:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--paper);
+}
+
+.lo-opt:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
+
+.lo-opt.is-selected {
+  border-color: var(--forest-700);
+  box-shadow: inset 0 0 0 1px var(--forest-700);
+  cursor: default;
+}
+
+.lo-opt:disabled:not(.is-selected) {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.lo-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lo-body b {
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lo-body small {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lo-body .lo-platform {
+  color: var(--ink-faint);
+}
+
+.lo-price {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.lo-tag {
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.lo-tag.is-less,
+.lo-tag.is-selected {
+  color: var(--forest-700);
+}
+
+/* Planner: total + next steps, always in reach once a plan exists */
+.pl-actionbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.pl-actionbar-total {
+  display: grid;
+  margin-right: auto;
+  line-height: 1.15;
+}
+
+.pl-actionbar-total b {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pl-actionbar-total small {
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}

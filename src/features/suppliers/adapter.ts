@@ -23,6 +23,8 @@ export type BookingContext = {
   idempotencyKey: string;
   /** DEMO_MODE only: make this booking fail on purpose. */
   forceFail?: boolean;
+  /** The lead traveller the supplier books under, from checkout. */
+  leadTraveller?: { firstName: string; lastName: string; email?: string };
 };
 
 /**

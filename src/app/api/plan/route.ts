@@ -1,34 +1,15 @@
 import { briefProblem, parseTripBrief } from "@/features/planner/tripBrief";
-import { buildItinerary, selectOffers } from "@/features/planner/planner";
-import { CatalogUnavailableError, searchCatalog, type SourceReport } from "@/features/suppliers/registry";
-import { comparisonsFor, type ProductComparison } from "@/features/suppliers/compare";
-import { summarizeDeal, type DealSummary } from "@/features/suppliers/deal";
+import { selectOffers } from "@/features/planner/planner";
+import { CatalogUnavailableError, searchCatalog } from "@/features/suppliers/registry";
 import { streamPlannerAgent, type PlannerStreamEvent } from "@/features/agent/plannerAgent";
-import { itineraryPlanSchema, type ItineraryPlanView } from "@/features/planner/travelOffer";
-import { saveQuote } from "@/features/quotes/quoteStore";
+import { finalizePlan, type PlanResult } from "@/features/quotes/planResult";
 import { authedUser } from "@/lib/supabase/authedUser";
 
 export const runtime = "nodejs";
 
 export type PlanStreamEvent =
   | PlannerStreamEvent
-  | {
-      kind: "plan";
-      plan: ItineraryPlanView;
-      note: string;
-      source: string;
-      /** Per supplier and kind: whether it answered, timed out, failed or was a fallback. */
-      sources: SourceReport[];
-      /** For the plan's own products: every platform's price, cheapest first. */
-      comparisons: ProductComparison[];
-      /** What the deal hunt found, computed by code (not the model): platforms, savings, date tips. */
-      deal: DealSummary;
-      retrievedAt: string;
-      // The server-held priced snapshot of this plan. Checkout pays this id,
-      // never the offers the browser holds. Absent only if it could not be saved,
-      // in which case the plan can be viewed but not paid.
-      quoteId?: string;
-    }
+  | ({ kind: "plan" } & PlanResult)
   | { kind: "error"; message: string };
 
 function ndjsonLine(event: PlanStreamEvent): Uint8Array {
@@ -64,28 +45,15 @@ export async function POST(request: Request) {
           step = await agentSteps.next();
         }
 
-        const plan = buildItinerary(brief, selectOffers(catalog, step.value.offerIds));
-
-        let quoteId: string | undefined;
-        try {
-          quoteId = await saveQuote({ userId: user?.id ?? null, brief, offers: plan.offers });
-        } catch (error) {
-          console.error("plan quote save failed", error);
-        }
-
-        controller.enqueue(
-          ndjsonLine({
-            kind: "plan",
-            plan: itineraryPlanSchema.parse(plan),
-            note: step.value.note,
-            source: [...new Set(plan.offers.map((offer) => offer.supplier))].join("+"),
-            sources,
-            comparisons: comparisonsFor(plan.offers, comparisons),
-            deal: summarizeDeal(plan.offers, comparisons, markets, sources),
-            retrievedAt: new Date().toISOString(),
-            ...(quoteId ? { quoteId } : {}),
-          }),
-        );
+        const result = await finalizePlan({
+          userId: user?.id ?? null,
+          brief,
+          selection: selectOffers(catalog, step.value.offerIds),
+          catalog,
+          insights: { comparisons, markets, sources },
+          note: step.value.note,
+        });
+        controller.enqueue(ndjsonLine({ kind: "plan", ...result }));
       } catch (error) {
         console.error("plan generation failed", error);
         const message =

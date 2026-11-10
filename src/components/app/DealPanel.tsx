@@ -2,12 +2,38 @@
 
 import { Icon, type IconName } from "@/components/brand/Icon";
 import type { DealSummary } from "@/features/suppliers/deal";
+import { platformInfo } from "@/features/suppliers/platforms";
 import "./deal.css";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const usd = (minor: number) => money.format(minor / 100);
 
 const kindIcon: Record<string, IconName> = { flight: "plane", hotel: "bed", activity: "compass" };
+const kindLabel: Record<string, string> = { flight: "Flight", hotel: "Hotel", activity: "Activity" };
+
+// A monogram per platform, not a brand logo: simulated partners are fictional,
+// and real platforms' marks aren't ours to reuse.
+const MARK_TONES = ["forest", "ember", "sky", "sand", "moss", "ink"] as const;
+function tone(supplier: string): (typeof MARK_TONES)[number] {
+  let hash = 0;
+  for (const char of supplier) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return MARK_TONES[hash % MARK_TONES.length];
+}
+
+export function PlatformMark({ supplier, label, small = false }: { supplier: string; label: string; small?: boolean }) {
+  const initials = label
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const simulated = platformInfo(supplier).data === "simulated";
+  return (
+    <span className={`pmark is-${tone(supplier)} ${simulated ? "is-simulated" : ""} ${small ? "is-small" : ""}`} aria-hidden="true">
+      {initials}
+    </span>
+  );
+}
 
 function dayLabel(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
@@ -47,24 +73,45 @@ export function DealPanel({ deal }: { deal: DealSummary }) {
         )}
       </header>
 
-      <ul className="deal-items">
+      <ul className="deal-cards">
         {deal.items.map((item) => (
-          <li key={item.offerId}>
-            <Icon name={kindIcon[item.kind] ?? "spark"} size={15} />
-            <span className="deal-item-title">{item.title}</span>
-            <span className="deal-item-via">
-              via <b>{item.chosen.label}</b>
-              {item.platformsCompared > 1 ? ` · best of ${item.platformsCompared}` : ""}
-            </span>
-            <span className="deal-item-price">
-              {usd(item.chosen.costMinorUnits)}
-              {item.savedMinorUnits > 0 && <small>−{usd(item.savedMinorUnits)}</small>}
-            </span>
+          <li key={item.offerId} className="deal-card">
+            <div className="deal-card-head">
+              <span className="deal-card-kind">
+                <Icon name={kindIcon[item.kind] ?? "spark"} size={14} /> {kindLabel[item.kind] ?? item.kind}
+              </span>
+              <span className="deal-card-price">{usd(item.chosen.costMinorUnits)}</span>
+            </div>
+            <p className="deal-card-title">{item.title}</p>
+            <p className="deal-card-best">
+              <PlatformMark supplier={item.chosen.supplier} label={item.chosen.label} />
+              <span>
+                Best deal on <b>{item.chosen.label}</b>
+                {item.platformsCompared > 1 ? ` · cheapest of ${item.platformsCompared} platforms` : ""}
+              </span>
+              {item.savedMinorUnits > 0 && <em className="deal-card-saved">saved {usd(item.savedMinorUnits)}</em>}
+            </p>
+            {item.sourceLabel && <p className="deal-card-source">Inventory from {item.sourceLabel}, resold by {item.chosen.label}</p>}
+            {(item.options ?? []).length > 1 && (
+              <ol className="deal-card-options" aria-label={`Prices for ${item.title}`}>
+                {(item.options ?? []).map((option) => (
+                  <li key={option.supplier} className={option.chosen ? "is-chosen" : ""} title={option.terms ?? undefined}>
+                    <PlatformMark supplier={option.supplier} label={option.label} small />
+                    <span className="deal-opt-name">
+                      {option.label}
+                      {option.role === "deeplink" ? " · price check" : ""}
+                    </span>
+                    <span className="deal-opt-price">{usd(option.costMinorUnits)}</span>
+                    {option.chosen && <span className="deal-opt-tag">Chosen</span>}
+                  </li>
+                ))}
+              </ol>
+            )}
           </li>
         ))}
       </ul>
 
-      {deal.tips.map((tip) => (
+      {(deal.tips ?? []).map((tip) => (
         <p key={`${tip.route}-${tip.date}`} className="deal-tip">
           <Icon name="calendar" size={15} /> Flying {tip.route.replace("-", " → ")} on <b>{dayLabel(tip.betterDate)}</b> instead of {dayLabel(tip.date)}: market fares
           from {usd(tip.marketFareMinorUnits)} vs. {usd(tip.bookableMinorUnits)} on your date ({tip.source}).
@@ -79,7 +126,7 @@ export function DealPanel({ deal }: { deal: DealSummary }) {
         </p>
       ))}
 
-      {deal.cheaperElsewhere.map((item) => (
+      {(deal.cheaperElsewhere ?? []).map((item) => (
         <p key={`${item.route}-${item.date}-cheaper`} className="deal-tip">
           <Icon name="arrow" size={15} /> A fare on {item.route.replace("-", " → ")} for {usd(item.fare.costMinorUnits)} was seen on Aviasales that day, below what partners can sell
           ({usd(item.bookableMinorUnits)}).{" "}
@@ -94,6 +141,7 @@ export function DealPanel({ deal }: { deal: DealSummary }) {
       <ul className="deal-platforms" aria-label="Platforms searched">
         {deal.platforms.map((platform) => (
           <li key={platform.supplier} className={`deal-chip is-${platform.data} ${platform.status === "ok" ? "" : "is-down"}`}>
+            <PlatformMark supplier={platform.supplier} label={platform.label} small />
             {platform.label}
             <small>
               {platform.role === "deeplink" ? "price check" : platform.data === "simulated" ? "simulated partner" : "live API"}

@@ -13,6 +13,14 @@ Partnerships, not scraping: Tripweave only reaches platforms through their own p
 
 Deterministic code, not the model, owns every price, total and booking.
 
+### Ask in your own words
+
+Type the trip the way you'd say it ("Japan, 2 people: Tokyo day 1, Osaka day 2, Mount Fuji on day 3"). An intake agent (`/api/intake`) reads it into a route of stops with nights, day-by-day wishes, dates, party and budget; code fills the gaps from the traveller's defaults and validates it. Multi-city trips get a flight per leg, a hotel per stop and the requested day trips as bookable activities. Any city works, not only the seven catalog destinations.
+
+- **Swap instantly.** Every flight leg and stay shows the other options from the same search, with platform and price difference. Picking one (or "make the hotel cheaper") rebuilds the plan from the saved catalog in about a second (`/api/plan/swap`), no new search.
+- **Checkout recovers.** If a supplier no longer confirms an item (a sandbox rate moved or sold out), checkout tries the next option for that leg or stay and asks the traveller to approve the new total.
+- **E-tickets.** After booking, `/tickets` shows a boarding pass, hotel voucher or activity ticket per item with a QR code (order and booking reference only) and the traveller names from checkout.
+
 ### The deal hunt
 
 1. `searchCatalog` queries every platform in parallel and keeps each product at its cheapest bookable platform.

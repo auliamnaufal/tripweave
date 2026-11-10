@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 import { createPlanOrder } from "@/features/payments/paypal";
-import { getQuote, markOrdered, saveQuote } from "@/features/quotes/quoteStore";
+import { getQuote, getQuoteSnapshot, markOrdered, saveQuote } from "@/features/quotes/quoteStore";
 import { authedUser } from "@/lib/supabase/authedUser";
 import { toTravelOffer, type TravelOfferView } from "@/features/planner/travelOffer";
 import type { PlanQuote } from "@/features/quotes/quote";
 import { repriceQuote } from "@/features/quotes/reprice";
 
 vi.mock("@/features/payments/paypal", () => ({ createPlanOrder: vi.fn() }));
-vi.mock("@/features/quotes/quoteStore", () => ({ getQuote: vi.fn(), markOrdered: vi.fn(), saveQuote: vi.fn() }));
+vi.mock("@/features/quotes/quoteStore", () => ({ getQuote: vi.fn(), markOrdered: vi.fn(), saveQuote: vi.fn(), getQuoteSnapshot: vi.fn(async () => null) }));
 // Real repricing logic, through the real registry (synthetic offers reprice as unchanged).
 vi.mock("@/features/quotes/reprice", async () => {
   const actual = await vi.importActual<typeof import("@/features/quotes/reprice")>("@/features/quotes/reprice");
@@ -148,6 +148,36 @@ describe("POST /api/payments/order", () => {
     expect(body).toMatchObject({ code: "quote-repriced", quoteId: "22222222-2222-4222-8222-222222222222", previousTotalMinorUnits: 157000 });
     expect(body.plan.totalCostMinorUnits).toBe(165000);
     expect(body.error).toContain("$1,650.00");
+    expect(createPlanOrder).not.toHaveBeenCalled();
+  });
+
+  it("recovers a sold-out stay with the next option from the same search, and asks before charging it", async () => {
+    vi.mocked(getQuote).mockResolvedValue(
+      quote({
+        brief: {
+          origin: { city: "San Francisco", country: "United States" },
+          destination: { city: "Springfield", country: "United States" },
+          timeZone: "UTC",
+          travelers: 2,
+          travelWindow: { startsAt: "2026-07-10T00:00:00Z", endsAt: "2026-07-15T23:59:59Z" },
+          hardBudget: { currency: "USD", amountMinorUnits: 350000 },
+          preferences: [],
+          constraints: [],
+        },
+      }),
+    );
+    vi.mocked(repriceQuote).mockResolvedValueOnce({ status: "unavailable", offerId: "hotel-main", reason: "This room is no longer available at this rate." });
+    const backup = { ...hotel, id: "hotel-backup", title: "Backup Inn", costMinorUnits: 90000 };
+    vi.mocked(getQuoteSnapshot).mockResolvedValue({ catalog: [flight, hotel, backup].map(toTravelOffer), insights: null });
+    vi.mocked(saveQuote).mockResolvedValue("33333333-3333-4333-8333-333333333333");
+
+    const response = await post({ quoteId: QUOTE_ID });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({ code: "quote-repriced", quoteId: "33333333-3333-4333-8333-333333333333" });
+    expect(body.error).toContain("switched to Backup Inn");
+    expect(body.plan.offers.map((o: { id: string }) => o.id)).toContain("hotel-backup");
     expect(createPlanOrder).not.toHaveBeenCalled();
   });
 

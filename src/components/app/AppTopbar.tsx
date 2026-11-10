@@ -11,7 +11,8 @@ export function AppTopbar({ back, children }: { back?: { href: string; label: st
     <header className="app-topbar">
       <div className="app-topbar-inner">
         <div className="app-topbar-left">
-          <Logo />
+          {/* Signed in, the app is home: the logo never drops you back on the landing page. */}
+          <Logo href={user ? "/plan" : "/"} />
           {back && (
             <Link href={back.href} className="app-back">
               <Icon name="arrow-left" size={16} />

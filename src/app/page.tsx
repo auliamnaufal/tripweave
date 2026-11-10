@@ -9,11 +9,13 @@ import { Workspace } from "@/components/landing/Workspace";
 import { Stories } from "@/components/landing/Stories";
 import { Faq } from "@/components/landing/Faq";
 import { Closing } from "@/components/landing/Closing";
+import { SignedInRedirect } from "@/components/landing/SignedInRedirect";
 import "@/components/landing/landing.css";
 
 export default function Home() {
   return (
     <>
+      <SignedInRedirect />
       <SiteNav />
       <main className="landing">
         <Hero />

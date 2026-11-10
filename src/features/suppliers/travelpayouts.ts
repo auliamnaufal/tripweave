@@ -3,6 +3,7 @@ import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 import type { SupplierAdapter } from "./adapter";
 import { flightMarketKey, resolveAirport } from "./duffel";
+import { tripLegs } from "@/features/planner/itinerary";
 
 // Travelpayouts / Aviasales Data API: real fares other travellers found on
 // Aviasales in the last days, cached per route and month. Not live and not
@@ -58,7 +59,7 @@ function listingUrl(link: string): string {
   return url.toString();
 }
 
-function toOffer(fare: CachedFare, from: string, to: string, leg: "out" | "ret", index: number, travelers: number): TravelOffer | null {
+function toOffer(fare: CachedFare, from: string, to: string, leg: string, index: number, travelers: number): TravelOffer | null {
   const departs = Date.parse(fare.departure_at);
   if (!Number.isFinite(departs) || !(fare.price > 0) || !fare.link) return null;
   const minutes = fare.duration_to ?? fare.duration ?? 0;
@@ -86,18 +87,18 @@ function toOffer(fare: CachedFare, from: string, to: string, leg: "out" | "ret",
   };
 }
 
+/** Market fares for every leg of the trip (out, between stops, home), month by month. */
 export async function searchMarketFares(brief: TripBrief): Promise<TravelOffer[]> {
-  const [origin, destination] = await Promise.all([resolveAirport(brief.origin.city), resolveAirport(brief.destination.city)]);
-  const from = origin.iata_code;
-  const to = destination.iata_code;
-  const [outbound, inbound] = await Promise.all([
-    monthFares(from, to, brief.travelWindow.startsAt.slice(0, 7)),
-    monthFares(to, from, brief.travelWindow.endsAt.slice(0, 7)),
-  ]);
-  return [
-    ...outbound.map((fare, index) => toOffer(fare, from, to, "out", index, brief.travelers)),
-    ...inbound.map((fare, index) => toOffer(fare, to, from, "ret", index, brief.travelers)),
-  ].filter((offer): offer is TravelOffer => offer !== null);
+  const legs = tripLegs(brief);
+  const perLeg = await Promise.all(
+    legs.map(async (leg) => {
+      const [origin, destination] = await Promise.all([resolveAirport(leg.from.city), resolveAirport(leg.to.city)]);
+      const fares = await monthFares(origin.iata_code, destination.iata_code, leg.date.slice(0, 7));
+      const tag = leg.label === "outbound" ? "out" : leg.label === "return" ? "ret" : leg.label;
+      return fares.map((fare, index) => toOffer(fare, origin.iata_code, destination.iata_code, tag, index, brief.travelers));
+    }),
+  );
+  return perLeg.flat().filter((offer): offer is TravelOffer => offer !== null);
 }
 
 export const travelpayoutsAdapter: SupplierAdapter = {

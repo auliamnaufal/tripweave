@@ -1,6 +1,7 @@
 import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
+import { tripLegs } from "@/features/planner/itinerary";
 import type { RepriceResult, SupplierAdapter } from "./adapter";
 import { simulateBooking } from "./booking";
 
@@ -67,9 +68,6 @@ export function resolveAirport(city: string): Promise<ResolvedPlace> {
   return promise;
 }
 
-function dateOnly(value: string): string {
-  return value.slice(0, 10);
-}
 
 function stamp(): { retrievedAt: string; expiresAt: string } {
   const retrievedAt = new Date().toISOString();
@@ -138,6 +136,18 @@ type DuffelSegment = {
   marketing_carrier_flight_number?: string;
 };
 
+/** The cheapest offer, then the rest picked evenly by departure time. */
+function spreadByDeparture(offers: DuffelOffer[], count: number): DuffelOffer[] {
+  const cheapest = offers[0];
+  const byTime = [...offers].sort((a, b) => (a.slices[0]?.segments[0]?.departing_at ?? "").localeCompare(b.slices[0]?.segments[0]?.departing_at ?? ""));
+  const picked = new Set<DuffelOffer>([cheapest]);
+  for (let i = 0; picked.size < count && i < count * 2; i++) {
+    picked.add(byTime[Math.min(byTime.length - 1, Math.floor((i * byTime.length) / Math.max(1, count - 1)))]);
+  }
+  for (const offer of byTime) if (picked.size < count) picked.add(offer);
+  return offers.filter((offer) => picked.has(offer));
+}
+
 /** The route and travel day, for comparing different flights in the same market. */
 export function flightMarketKey(from: string, to: string, localDeparture: string): string {
   return `flight-market:${from}-${to}@${localDeparture.slice(0, 10)}`;
@@ -165,10 +175,11 @@ async function searchFlightLeg(
   to: string,
   departureDate: string,
   adults: number,
-  legLabel: "outbound" | "return",
+  legLabel: string,
   departureZone: string,
   arrivalZone: string,
   stamped: { retrievedAt: string; expiresAt: string },
+  maxOffers = 3,
 ): Promise<TravelOffer[]> {
   const body = (await duffelFetch("/air/offer_requests?return_offers=true", {
     method: "POST",
@@ -184,7 +195,10 @@ async function searchFlightLeg(
   if (offers.length === 0) return [];
   const rate = await usdRate(offers[0].total_currency);
 
-  return offers.slice(0, 3).flatMap((offer, index) => {
+  // Spread the kept offers across the day, not just the cheapest few: a
+  // connecting leg has to leave after the previous one lands.
+  const kept = maxOffers >= offers.length ? offers : spreadByDeparture(offers, maxOffers);
+  return kept.flatMap((offer, index) => {
     const segments = offer.slices[0]?.segments ?? [];
     if (segments.length === 0) return [];
     const first = segments[0];
@@ -214,35 +228,25 @@ async function searchFlightLeg(
   });
 }
 
+/**
+ * One offer request per leg of the trip (see tripLegs): out and back for a
+ * single city, plus one between each pair of stops for a multi-city trip.
+ */
 export async function searchFlights(brief: TripBrief): Promise<TravelOffer[]> {
-  const [origin, destination] = await Promise.all([
-    resolvePlace(brief.origin.city),
-    resolvePlace(brief.destination.city),
-  ]);
+  const legs = tripLegs(brief);
+  const cities = [...new Set(legs.flatMap((leg) => [leg.from.city, leg.to.city]))];
+  const places = new Map(await Promise.all(cities.map(async (city) => [city, await resolvePlace(city)] as const)));
   const stamped = stamp();
-  const [outbound, inbound] = await Promise.all([
-    searchFlightLeg(
-      origin.iata_code,
-      destination.iata_code,
-      dateOnly(brief.travelWindow.startsAt),
-      brief.travelers,
-      "outbound",
-      origin.time_zone,
-      destination.time_zone,
-      stamped,
-    ),
-    searchFlightLeg(
-      destination.iata_code,
-      origin.iata_code,
-      dateOnly(brief.travelWindow.endsAt),
-      brief.travelers,
-      "return",
-      destination.time_zone,
-      origin.time_zone,
-      stamped,
-    ),
-  ]);
-  return [...outbound, ...inbound];
+  const perLeg = await Promise.all(
+    legs.map((leg) => {
+      const from = places.get(leg.from.city)!;
+      const to = places.get(leg.to.city)!;
+      // Multi-city trips get more options per leg so connections can line up.
+      const maxOffers = legs.length > 2 ? 6 : 3;
+      return searchFlightLeg(from.iata_code, to.iata_code, leg.date, brief.travelers, leg.label, from.time_zone, to.time_zone, stamped, maxOffers);
+    }),
+  );
+  return perLeg.flat();
 }
 
 function earlierOf(ours: string, theirs: string | undefined): string {

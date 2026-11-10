@@ -347,7 +347,44 @@ export function findDestination(text: string): Destination | undefined {
 }
 
 export function getDestination(id: string | null | undefined): Destination {
-  return destinations.find((d) => d.id === id) ?? destinations[0];
+  return destinations.find((d) => d.id === id) ?? (id ? customDestinations.get(id) : undefined) ?? destinations[0];
+}
+
+/** What the UI needs to show a place outside the catalog (from the intake agent's reading of a request). */
+export type CustomPlace = { id: string; name: string; country: string; airport: string; route: string[] };
+
+const customDestinations = new Map<string, Destination>();
+
+/**
+ * Registers a trip to anywhere: the screens get a Destination named after the
+ * real route ("Tokyo · Osaka"). Its sample flights, stays and food come from
+ * the closest catalog place (same country if there is one) and only fill
+ * placeholders; the live plan supplies everything that's bought.
+ */
+export function registerCustomDestination(place: CustomPlace): Destination {
+  const existing = customDestinations.get(place.id);
+  if (existing) return existing;
+  const template = findDestination(place.country) ?? findDestination(place.route.join(" ")) ?? destinations[0];
+  const sameCountry = template.country.toLowerCase().includes(place.country.toLowerCase()) || place.country.toLowerCase().includes(template.country.toLowerCase());
+  const destination: Destination = {
+    ...template,
+    id: place.id,
+    name: place.name,
+    country: place.country,
+    airport: place.airport || template.airport,
+    hero: sameCountry ? template.hero : "/images/hero-mist.webp",
+    card: sameCountry ? template.card : "/images/c-valley.webp",
+    tagline: place.route.join(" → "),
+    blurb: `${place.route.join(", then ")}, planned from what you asked for.`,
+    keywords: [],
+    tips: sameCountry ? template.tips : [],
+  };
+  customDestinations.set(place.id, destination);
+  return destination;
+}
+
+export function isCustomDestination(id: string | null | undefined): boolean {
+  return Boolean(id && customDestinations.has(id));
 }
 
 export type TripPrefs = {
