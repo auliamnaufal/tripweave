@@ -87,8 +87,8 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "oahu-h1", name: "Haleʻiwa Garden Cottage", area: "North Shore", nightly: 245, rating: 4.8, reviews: 212, image: img("oahu-hotel"), perks: ["Ocean-view lanai", "Bikes included", "Free cancellation until 7 days before"], tag: "Quiet pick" },
-      { id: "oahu-h2", name: "Kailua Beach Studio", area: "Kailua", nightly: 189, rating: 4.6, reviews: 148, image: "/images/h-book.webp", perks: ["5 min walk to Kailua Beach", "Kitchenette", "Kayak rental nearby"], tag: "Best value" },
-      { id: "oahu-h3", name: "The Surfjack", area: "Waikiki", nightly: 312, rating: 4.5, reviews: 1834, image: "/images/w-oahu.webp", perks: ["Pool and bar", "Walk to everything", "Breakfast included"], tag: "Lively" },
+      { id: "oahu-h2", name: "Kailua Beach Studio", area: "Kailua", nightly: 189, rating: 4.6, reviews: 148, image: img("oahu-hotel2"), perks: ["5 min walk to Kailua Beach", "Kitchenette", "Kayak rental nearby"], tag: "Best value" },
+      { id: "oahu-h3", name: "The Surfjack", area: "Waikiki", nightly: 312, rating: 4.5, reviews: 1834, image: img("oahu-hotel3"), perks: ["Pool and bar", "Walk to everything", "Breakfast included"], tag: "Lively" },
     ],
     activities: [
       { id: "oahu-a1", title: "Hanauma Bay snorkel", duration: "3 hrs", pricePerPerson: 48, rating: 4.7, image: img("oahu-act1"), category: "Water", slot: "08:00" },
@@ -125,8 +125,8 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "kyoto-h1", name: "Ryokan Yachiyo", area: "Nanzenji", nightly: 290, rating: 4.8, reviews: 534, image: img("kyoto-hotel"), perks: ["Cedar bath", "Kaiseki breakfast", "Garden-view room"], tag: "Traditional" },
-      { id: "kyoto-h2", name: "Machiya House Sanjo", area: "Nakagyo", nightly: 165, rating: 4.7, reviews: 302, image: "/images/w-kyoto.webp", perks: ["Whole townhouse", "Walk to Nishiki Market", "Washing machine"], tag: "Best value" },
-      { id: "kyoto-h3", name: "Hotel The Celestine", area: "Gion", nightly: 340, rating: 4.6, reviews: 1290, image: "/images/h-book.webp", perks: ["Onsen on site", "Gion at the door", "Late check-out"], tag: "Central" },
+      { id: "kyoto-h2", name: "Machiya House Sanjo", area: "Nakagyo", nightly: 165, rating: 4.7, reviews: 302, image: img("kyoto-hotel2"), perks: ["Whole townhouse", "Walk to Nishiki Market", "Washing machine"], tag: "Best value" },
+      { id: "kyoto-h3", name: "Hotel The Celestine", area: "Gion", nightly: 340, rating: 4.6, reviews: 1290, image: img("kyoto-hotel3"), perks: ["Onsen on site", "Gion at the door", "Late check-out"], tag: "Central" },
     ],
     activities: [
       { id: "kyoto-a1", title: "Fushimi Inari at dawn", duration: "2.5 hrs", pricePerPerson: 0, rating: 4.9, image: "/images/d-kyoto.webp", category: "Culture", slot: "06:00" },
@@ -163,8 +163,8 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "lisbon-h1", name: "Casa Azulejo Alfama", area: "Alfama", nightly: 138, rating: 4.8, reviews: 421, image: img("lisbon-hotel"), perks: ["River-view window", "Breakfast with pastéis", "Free cancellation"], tag: "Charming" },
-      { id: "lisbon-h2", name: "Lisboa Hostel Rooms", area: "Baixa", nightly: 92, rating: 4.5, reviews: 2104, image: "/images/h-book.webp", perks: ["Private double", "Metro at the door", "Rooftop terrace"], tag: "Best value" },
-      { id: "lisbon-h3", name: "Memmo Príncipe Real", area: "Príncipe Real", nightly: 265, rating: 4.7, reviews: 980, image: "/images/w-lisbon.webp", perks: ["Pool with city view", "Quiet street", "Late check-out"], tag: "Treat" },
+      { id: "lisbon-h2", name: "Lisboa Hostel Rooms", area: "Baixa", nightly: 92, rating: 4.5, reviews: 2104, image: img("lisbon-hotel2"), perks: ["Private double", "Metro at the door", "Rooftop terrace"], tag: "Best value" },
+      { id: "lisbon-h3", name: "Memmo Príncipe Real", area: "Príncipe Real", nightly: 265, rating: 4.7, reviews: 980, image: img("lisbon-hotel3"), perks: ["Pool with city view", "Quiet street", "Late check-out"], tag: "Treat" },
     ],
     activities: [
       { id: "lisbon-a1", title: "Day trip to Sintra", duration: "Full day", pricePerPerson: 65, rating: 4.7, image: img("lisbon-act1"), category: "Day trip", slot: "09:30" },
@@ -201,8 +201,8 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "pat-h1", name: "Refugio Los Cerros", area: "El Chaltén", nightly: 185, rating: 4.7, reviews: 388, image: img("patagonia-hotel"), perks: ["Wood stove lounge", "Packed trail lunches", "Drying room"], tag: "Trekker’s base" },
-      { id: "pat-h2", name: "Hostería Senderos", area: "El Chaltén", nightly: 120, rating: 4.6, reviews: 612, image: "/images/m-tent.webp", perks: ["Big breakfast", "Gear storage", "Trailhead 5 min"], tag: "Best value" },
-      { id: "pat-h3", name: "Estancia La Quinta", area: "Outside town", nightly: 260, rating: 4.8, reviews: 214, image: img("patagonia-act2"), perks: ["Asado dinners", "Horse riding", "Mountain views"], tag: "Remote" },
+      { id: "pat-h2", name: "Hostería Senderos", area: "El Chaltén", nightly: 120, rating: 4.6, reviews: 612, image: img("patagonia-hotel2"), perks: ["Big breakfast", "Gear storage", "Trailhead 5 min"], tag: "Best value" },
+      { id: "pat-h3", name: "Estancia La Quinta", area: "Outside town", nightly: 260, rating: 4.8, reviews: 214, image: img("patagonia-hotel3"), perks: ["Asado dinners", "Horse riding", "Mountain views"], tag: "Remote" },
     ],
     activities: [
       { id: "pat-a1", title: "Laguna de los Tres at sunrise", duration: "10 hrs", pricePerPerson: 0, rating: 4.9, image: "/images/d-patagonia.webp", category: "Hike", slot: "03:30" },
@@ -239,14 +239,14 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "bali-h1", name: "Villa Sungai Sayan", area: "Sayan", nightly: 210, rating: 4.9, reviews: 267, image: img("bali-hotel"), perks: ["Private plunge pool", "Floating breakfast", "Valley view"], tag: "Splurge-ish" },
-      { id: "bali-h2", name: "Ubud Garden Bungalows", area: "Penestanan", nightly: 75, rating: 4.7, reviews: 943, image: "/images/d-bali.webp", perks: ["Rice-field view", "Shared pool", "Scooter rental"], tag: "Best value" },
-      { id: "bali-h3", name: "Kayon Jungle Retreat", area: "Kelusa", nightly: 320, rating: 4.8, reviews: 1820, image: img("bali-act2"), perks: ["Infinity pool", "Spa", "Daily yoga"], tag: "Retreat" },
+      { id: "bali-h2", name: "Ubud Garden Bungalows", area: "Penestanan", nightly: 75, rating: 4.7, reviews: 943, image: img("bali-hotel2"), perks: ["Rice-field view", "Shared pool", "Scooter rental"], tag: "Best value" },
+      { id: "bali-h3", name: "Kayon Jungle Retreat", area: "Kelusa", nightly: 320, rating: 4.8, reviews: 1820, image: img("bali-hotel3"), perks: ["Infinity pool", "Spa", "Daily yoga"], tag: "Retreat" },
     ],
     activities: [
       { id: "bali-a1", title: "Tegallalang terraces at dawn", duration: "2 hrs", pricePerPerson: 3, rating: 4.5, image: "/images/d-bali.webp", category: "Nature", slot: "06:30" },
       { id: "bali-a2", title: "Balinese cooking class", duration: "5 hrs", pricePerPerson: 38, rating: 4.9, image: img("bali-act1"), category: "Food", slot: "08:00" },
       { id: "bali-a3", title: "Mount Batur sunrise trek", duration: "8 hrs", pricePerPerson: 55, rating: 4.7, image: img("bali-act2"), category: "Hike", slot: "02:00" },
-      { id: "bali-a4", title: "Campuhan ridge walk", duration: "1.5 hrs", pricePerPerson: 0, rating: 4.6, image: "/images/d-bali.webp", category: "Walk", slot: "16:30" },
+      { id: "bali-a4", title: "Campuhan ridge walk", duration: "1.5 hrs", pricePerPerson: 0, rating: 4.6, image: img("bali-act4"), category: "Walk", slot: "16:30" },
     ],
     food: [
       { name: "Warung Biah Biah", dish: "Small-plate nasi campur", area: "Ubud centre", price: "$", note: "Order five plates and share", image: img("bali-food") },
@@ -277,13 +277,13 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "amalfi-h1", name: "Casa Limoncello", area: "Positano", nightly: 330, rating: 4.8, reviews: 412, image: img("amalfi-hotel"), perks: ["Sea-view terrace", "Breakfast on the roof", "Port transfer"], tag: "View" },
-      { id: "amalfi-h2", name: "Pensione Maria Luisa", area: "Positano", nightly: 175, rating: 4.7, reviews: 830, image: "/images/h-book.webp", perks: ["Family-run", "Balcony room", "Near Fornillo beach"], tag: "Best value" },
-      { id: "amalfi-h3", name: "Hotel Villa Cimbrone", area: "Ravello", nightly: 520, rating: 4.9, reviews: 690, image: "/images/d-amalfi.webp", perks: ["Historic gardens", "Infinity terrace", "Pool"], tag: "Once in a lifetime" },
+      { id: "amalfi-h2", name: "Pensione Maria Luisa", area: "Positano", nightly: 175, rating: 4.7, reviews: 830, image: img("amalfi-hotel2"), perks: ["Family-run", "Balcony room", "Near Fornillo beach"], tag: "Best value" },
+      { id: "amalfi-h3", name: "Hotel Villa Cimbrone", area: "Ravello", nightly: 520, rating: 4.9, reviews: 690, image: img("amalfi-hotel3"), perks: ["Historic gardens", "Infinity terrace", "Pool"], tag: "Once in a lifetime" },
     ],
     activities: [
       { id: "amalfi-a1", title: "Path of the Gods hike", duration: "4 hrs", pricePerPerson: 0, rating: 4.9, image: img("amalfi-act1"), category: "Hike", slot: "07:30" },
       { id: "amalfi-a2", title: "Private boat to Capri", duration: "Full day", pricePerPerson: 160, rating: 4.8, image: img("amalfi-act2"), category: "Water", slot: "09:30" },
-      { id: "amalfi-a3", title: "Ravello gardens and concert", duration: "4 hrs", pricePerPerson: 45, rating: 4.6, image: "/images/d-amalfi.webp", category: "Culture", slot: "16:00" },
+      { id: "amalfi-a3", title: "Ravello gardens and concert", duration: "4 hrs", pricePerPerson: 45, rating: 4.6, image: img("amalfi-act3"), category: "Culture", slot: "16:00" },
       { id: "amalfi-a4", title: "Lemon farm lunch", duration: "3 hrs", pricePerPerson: 70, rating: 4.8, image: img("amalfi-food"), category: "Food", slot: "12:30" },
     ],
     food: [
@@ -315,14 +315,14 @@ export const destinations: Destination[] = [
     ],
     hotels: [
       { id: "ice-h1", name: "Hrífunes Guesthouse", area: "Vík region", nightly: 220, rating: 4.8, reviews: 512, image: img("iceland-hotel"), perks: ["Aurora wake-up call", "Hot tub", "Home-cooked dinner"], tag: "Cosy" },
-      { id: "ice-h2", name: "Skógar Farm Rooms", area: "Skógar", nightly: 150, rating: 4.5, reviews: 380, image: "/images/m-tent.webp", perks: ["Walk to Skógafoss", "Shared kitchen", "Free parking"], tag: "Best value" },
-      { id: "ice-h3", name: "Hotel Rangá", area: "Hella", nightly: 380, rating: 4.7, reviews: 1460, image: "/images/c-valley.webp", perks: ["Observatory", "Outdoor hot tubs", "Fine dining"], tag: "Aurora hunter" },
+      { id: "ice-h2", name: "Skógar Farm Rooms", area: "Skógar", nightly: 150, rating: 4.5, reviews: 380, image: img("iceland-hotel2"), perks: ["Walk to Skógafoss", "Shared kitchen", "Free parking"], tag: "Best value" },
+      { id: "ice-h3", name: "Hotel Rangá", area: "Hella", nightly: 380, rating: 4.7, reviews: 1460, image: img("iceland-hotel3"), perks: ["Observatory", "Outdoor hot tubs", "Fine dining"], tag: "Aurora hunter" },
     ],
     activities: [
       { id: "ice-a1", title: "Sólheimajökull glacier walk", duration: "3 hrs", pricePerPerson: 115, rating: 4.8, image: img("iceland-act1"), category: "Adventure", slot: "10:00" },
       { id: "ice-a2", title: "Reykjadalur hot river", duration: "3 hrs", pricePerPerson: 0, rating: 4.7, image: img("iceland-act2"), category: "Hike", slot: "15:00" },
       { id: "ice-a3", title: "Landmannalaugar day", duration: "Full day", pricePerPerson: 160, rating: 4.9, image: "/images/d-iceland.webp", category: "Day trip", slot: "07:30" },
-      { id: "ice-a4", title: "Reynisfjara black beach", duration: "1.5 hrs", pricePerPerson: 0, rating: 4.6, image: "/images/c-valley.webp", category: "Nature", slot: "18:00" },
+      { id: "ice-a4", title: "Reynisfjara black beach", duration: "1.5 hrs", pricePerPerson: 0, rating: 4.6, image: img("iceland-act4"), category: "Nature", slot: "18:00" },
     ],
     food: [
       { name: "Súpa Café", dish: "Lamb soup refills", area: "Vík", price: "$", note: "Bread is free", image: img("iceland-food") },

@@ -10,7 +10,7 @@ import { streamCapture } from "@/features/live/client";
 import { livePaymentStore, type LivePayment } from "@/features/live/liveStore";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
 import type { TravelOfferView } from "@/features/planner/travelOffer";
-import { gsap, SplitText, useGSAP } from "@/lib/gsap";
+import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
 
 type Status = "queued" | "booking" | "booked" | "failed" | "refunded";
 type Kind = "flight" | "hotel" | "activity";
@@ -168,6 +168,7 @@ function BookedInner({ view, payment }: { view: AnyTripView; payment: LivePaymen
 
   useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       const split = SplitText.create(".bk-title", { type: "words", mask: "words", wordsClass: "sw" });
       gsap
         .timeline({ defaults: { ease: "expo.out" } })

@@ -6,8 +6,8 @@ import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
-import { useHydrated, useOrders } from "@/features/ui-mock/tripStore";
-import { gsap, SplitText, useGSAP } from "@/lib/gsap";
+import { savedStore, useHydrated, useOrders, useSaved } from "@/features/ui-mock/tripStore";
+import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 
 const kindIcon: Record<string, IconName> = {
@@ -35,12 +35,34 @@ export function TripView() {
 function TripViewInner({ view }: { view: AnyTripView }) {
   const root = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState("itinerary");
+  const [shareNote, setShareNote] = useState("");
   const lenis = useLenis();
+  const saved = useSaved();
+  const destId = view.plan.prefs.destId;
+  const isSaved = saved.includes(destId);
+  const people = `${view.travelers} ${view.travelers === 1 ? "traveller" : "travellers"}`;
+
+  async function share() {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: view.title, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setShareNote("Link copied");
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setShareNote("Copy the link from the address bar to share");
+    }
+    window.setTimeout(() => setShareNote(""), 2400);
+  }
   const total = view.total;
   // Same (destId, total) pairing Booked.tsx records the order under — this plan
   // was already paid for if an order for it is already in the store.
   const orders = useOrders();
   const paid = orders.some((o) => o.destId === view.plan.prefs.destId && o.total === total);
+  const over = total > view.budget;
   const flightsTotal = view.flights.reduce((s, f) => s + f.price, 0);
   const actTotal = view.activities.reduce((s, a) => s + a.price, 0);
   const breakdown = [
@@ -101,7 +123,9 @@ function TripViewInner({ view }: { view: AnyTripView }) {
         return () => split.revert();
       });
 
-      sections.forEach((s) => {
+      // The budget card is sticky beside the days on wide screens, so it only drives the active tab once the grid stacks.
+      const stacked = window.matchMedia("(max-width: 1020px)").matches;
+      sections.filter((s) => stacked || s.id !== "budget").forEach((s) => {
         gsap.timeline({
           scrollTrigger: {
             trigger: `#${s.id}`,
@@ -118,6 +142,11 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   function go(id: string) {
     const el = document.getElementById(id);
     if (!el) return;
+    setActive(id);
+    if (prefersReducedMotion()) {
+      el.scrollIntoView();
+      return;
+    }
     if (lenis) lenis.scrollTo(el, { offset: -130, duration: 1.3 });
     else el.scrollIntoView({ behavior: "smooth" });
   }
@@ -125,17 +154,25 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   return (
     <div ref={root} className="trip-page">
       <AppTopbar back={{ href: "/plan", label: "Back to chat" }}>
-        <button type="button" className="chip">
-          <Icon name="heart" /> Save
+        <span className="sr-only" role="status">
+          {shareNote}
+        </span>
+        <button
+          type="button"
+          className={`chip ${isSaved ? "is-on" : ""}`}
+          aria-pressed={isSaved}
+          onClick={() => savedStore.set(isSaved ? saved.filter((x) => x !== destId) : [...saved, destId])}
+        >
+          <Icon name="heart" /> <span className="chip-label">{isSaved ? "Saved" : "Save"}</span>
         </button>
-        <button type="button" className="chip">
-          <Icon name="users" /> Share
+        <button type="button" className="chip" onClick={() => void share()}>
+          <Icon name="users" /> <span className="chip-label">{shareNote || "Share"}</span>
         </button>
       </AppTopbar>
 
       <section className="trip-hero">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="trip-hero-img" src={view.hero} alt="Lanikai Bay and the Mokulua islands from the pillbox trail" />
+        <img className="trip-hero-img" src={view.hero} alt="" />
         <div className="trip-hero-shade" />
         <div className="trip-hero-copy app-wrap">
           <span className="tag-sample trip-tag">{isLive(view) ? "Planned by the agent · live flight fares" : "Sample itinerary"}</span>
@@ -148,7 +185,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
               <Icon name="calendar" size={15} /> {view.dates}
             </li>
             <li>
-              <Icon name="users" size={15} /> {view.travelers} travellers
+              <Icon name="users" size={15} /> {people}
             </li>
             <li>
               <Icon name="plane" size={15} /> From {view.origin}
@@ -160,7 +197,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
       <nav className="trip-subnav" aria-label="Sections">
         <div className="app-wrap trip-subnav-inner">
           {sections.map((s) => (
-            <button key={s.id} type="button" className={active === s.id ? "is-active" : ""} onClick={() => go(s.id)}>
+            <button key={s.id} type="button" className={active === s.id ? "is-active" : ""} aria-current={active === s.id ? "location" : undefined} onClick={() => go(s.id)}>
               {s.label}
             </button>
           ))}
@@ -270,9 +307,6 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 </ul>
                 <div className="trip-stay-foot">
                   <b>{usd.format(view.hotel.price)}</b>
-                  <button type="button" className="chip">
-                    <Icon name="refresh" /> Swap stay
-                  </button>
                 </div>
               </div>
             </article>
@@ -305,11 +339,12 @@ function TripViewInner({ view }: { view: AnyTripView }) {
               <span>for {view.travelers}</span>
             </div>
             <div className="budget-bar budget-bar-lg">
-              <i style={{ width: `${(total / view.budget) * 100}%` }} />
+              <i style={{ width: `${Math.min(100, (total / view.budget) * 100)}%` }} />
               <span className="budget-cap" />
             </div>
-            <p className="trip-under">
-              <Icon name="shield" size={15} /> {usd.format(view.budget - total)} under your {usd.format(view.budget)} limit
+            <p className={`trip-under ${over ? "is-over" : ""}`}>
+              <Icon name={over ? "close" : "shield"} size={15} />{" "}
+              {over ? `${usd.format(total - view.budget)} over your ${usd.format(view.budget)} limit` : `${usd.format(view.budget - total)} under your ${usd.format(view.budget)} limit`}
             </p>
             <div className="trip-stack" aria-hidden="true">
               {breakdown.map((b) => (
@@ -342,16 +377,6 @@ function TripViewInner({ view }: { view: AnyTripView }) {
               {paid ? "This trip is paid for. Every booking is already underway." : "One approval covers every booking. Nothing is stored after you pay."}
             </p>
           </div>
-          <form className="trip-ask" onSubmit={(e) => e.preventDefault()}>
-            <Icon name="spark" size={16} />
-            <label htmlFor="ask" className="sr-only">
-              Ask for a change
-            </label>
-            <input id="ask" placeholder="Ask for a change…" />
-            <button type="submit" aria-label="Send">
-              <Icon name="send" size={16} />
-            </button>
-          </form>
         </aside>
       </div>
     </div>

@@ -18,7 +18,8 @@ import {
   type TripPrefs,
 } from "@/features/ui-mock/destinations";
 import { acknowledgements, applyAnswer, planSummary, questions, suggestionsFor, type QuestionId } from "@/features/ui-mock/agentScript";
-import { docsStore, historyStore, tripStore, useDocs, useHistory, useUser } from "@/features/ui-mock/tripStore";
+import { docsStore, historyStore, savedStore, tripStore, useDocs, useHistory, useSaved, useUser } from "@/features/ui-mock/tripStore";
+import { tabKeys } from "@/components/app/tabKeys";
 import {
   blockers,
   docIntent,
@@ -37,7 +38,7 @@ import {
   type TravelDoc,
 } from "@/features/ui-mock/documents";
 import { DocChecklist, useDocPicker } from "@/components/app/TravelDocs";
-import { gsap, useGSAP } from "@/lib/gsap";
+import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 import { briefFromPrefs, streamPlan, type TripBriefWire } from "@/features/live/client";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
 import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
@@ -127,9 +128,13 @@ export function Planner() {
   const [collapsed, setCollapsed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const docs = useDocs();
+  const saved = useSaved();
+  const [announce, setAnnounce] = useState("");
   const docUndo = useRef<TravelDoc | null>(null);
 
   const root = useRef<HTMLDivElement>(null);
+  const planChip = useRef<HTMLButtonElement>(null);
+  const panelClose = useRef<HTMLButtonElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const prefsRef = useRef<TripPrefs | null>(null);
   const alive = useRef(true);
@@ -150,6 +155,15 @@ export function Planner() {
   }, []);
 
   useEffect(() => {
+    if (panelOpen) panelClose.current?.focus();
+  }, [panelOpen]);
+
+  function closePanel() {
+    setPanelOpen(false);
+    planChip.current?.focus();
+  }
+
+  useEffect(() => {
     prefsRef.current = prefs;
     if (prefs && planned) tripStore.set(prefs);
   }, [prefs, planned]);
@@ -161,6 +175,7 @@ export function Planner() {
 
   useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       gsap.from(".pl-side > *", { x: -16, opacity: 0, stagger: 0.04, duration: 0.8, ease: "expo.out" });
       gsap.from(".pl-welcome > *", { y: 28, opacity: 0, stagger: 0.07, duration: 1.1, ease: "expo.out", delay: 0.1 });
       gsap.from(".pl-place", { y: 30, opacity: 0, stagger: 0.05, duration: 1, ease: "expo.out", delay: 0.35 });
@@ -195,6 +210,7 @@ export function Planner() {
       await sleep(22);
     }
     patch(id, (b) => (b.role === "agent" && b.kind === "text" ? { ...b, streaming: false } : b));
+    setAnnounce(text);
   }
 
   async function runWork(title: string, steps: { tool: string; label: string; result: () => string; ms: number; preview?: Step["preview"] }[], onStep?: (i: number) => void) {
@@ -272,7 +288,9 @@ export function Planner() {
     push({ id: tid, role: "agent", kind: "typing" });
     await sleep(550);
     remove(tid);
-    push({ id: nid(), role: "agent", kind: "question", qid: q.id, text: q.ask(d, p), options: q.options, multi: !!q.multi, done: false, picked: [] });
+    const ask = q.ask(d, p);
+    push({ id: nid(), role: "agent", kind: "question", qid: q.id, text: ask, options: q.options, multi: !!q.multi, done: false, picked: [] });
+    setAnnounce(ask);
     setQIndex(i);
   }
 
@@ -722,7 +740,8 @@ export function Planner() {
   }, [params]);
 
   const activeQuestion = qIndex !== null ? questions[qIndex] : null;
-  const placeholder = activeQuestion ? activeQuestion.placeholder : planned ? "Ask for a change: cheaper, slower, more food…" : "Name a place…";
+  const placeholder = activeQuestion ? activeQuestion.placeholder : busy ? "The planner is working…" : planned ? "Ask for a change: cheaper, slower, more food…" : "Name a place…";
+  const destSaved = dest ? saved.includes(dest.id) : false;
 
   return (
     <div ref={root} className={`pl ${collapsed ? "is-collapsed" : ""}`}>
@@ -790,10 +809,23 @@ export function Planner() {
             <LogoMark />
           </Link>
           <span>{dest ? dest.name : "New trip"}</span>
-          <button type="button" className="chip" onClick={() => setPanelOpen(true)} disabled={!dest}>
-            <Icon name="map" /> Plan
-          </button>
+          <div className="pl-mobilebar-actions">
+            <button ref={planChip} type="button" className="chip" onClick={() => setPanelOpen(true)} disabled={!dest} aria-expanded={panelOpen}>
+              <Icon name="map" /> Plan
+            </button>
+            <Link href={user ? "/account" : "/login?next=/plan"} className="pl-mobile-account" aria-label={user ? "Account" : "Sign in"}>
+              {user ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.avatar} alt="" />
+              ) : (
+                <Icon name="user" size={18} />
+              )}
+            </Link>
+          </div>
         </header>
+        <p className="sr-only" role="status">
+          {announce}
+        </p>
 
         <div className="pl-thread" ref={threadRef} data-lenis-prevent>
           {blocks.length === 0 ? (
@@ -959,8 +991,15 @@ export function Planner() {
         )}
       </main>
 
-      <aside className={`pl-panel ${panelOpen ? "is-open" : ""}`} aria-label="Trip details" data-lenis-prevent>
-        <button type="button" className="pl-panel-close" onClick={() => setPanelOpen(false)} aria-label="Close plan">
+      <aside
+        className={`pl-panel ${panelOpen ? "is-open" : ""}`}
+        aria-label="Trip details"
+        data-lenis-prevent
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && panelOpen) closePanel();
+        }}
+      >
+        <button ref={panelClose} type="button" className="pl-panel-close" onClick={closePanel} aria-label="Close trip details">
           <Icon name="close" size={16} />
         </button>
         {!dest || !plan ? (
@@ -976,14 +1015,21 @@ export function Planner() {
           <div className="pl-panel-inner" key={dest.id}>
             <div className="pl-dest">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={dest.card} alt={dest.name} />
+              <img src={dest.card} alt="" />
               <div>
                 <h2>{dest.name}</h2>
                 <span>
                   <Icon name="pin" size={14} /> {dest.country}
                 </span>
               </div>
-              <button type="button" className="pl-dest-fav" aria-label="Save">
+              <button
+                type="button"
+                className={`pl-dest-fav ${destSaved ? "is-on" : ""}`}
+                aria-pressed={destSaved}
+                aria-label={`Save ${dest.name}`}
+                title={destSaved ? "Saved to your places" : "Save to your places"}
+                onClick={() => savedStore.set(destSaved ? saved.filter((x) => x !== dest.id) : [...saved, dest.id])}
+              >
                 <Icon name="heart" size={16} />
               </button>
             </div>
@@ -1001,20 +1047,33 @@ export function Planner() {
                 <dd>{dest.currency}</dd>
               </div>
             </dl>
-            <div className="pl-tabs" role="tablist">
-              {(["overview", "todo", "map"] as const).map((t) => (
-                <button key={t} type="button" role="tab" aria-selected={panelTab === t} className={panelTab === t ? "is-active" : ""} onClick={() => setPanelTab(t)}>
+            <div className="pl-tabs" role="tablist" aria-label="Trip details">
+              {(["overview", "todo", "map"] as const).map((t, _i, all) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  id={`pl-tab-${t}`}
+                  data-tab={t}
+                  aria-selected={panelTab === t}
+                  aria-controls="pl-tabpanel"
+                  tabIndex={panelTab === t ? 0 : -1}
+                  className={panelTab === t ? "is-active" : ""}
+                  onClick={() => setPanelTab(t)}
+                  onKeyDown={(e) => tabKeys(e, all, panelTab, setPanelTab)}
+                >
                   {t === "overview" ? "Overview" : t === "todo" ? "Things to do" : "Map"}
                 </button>
               ))}
             </div>
 
+            <div id="pl-tabpanel" role="tabpanel" aria-labelledby={`pl-tab-${panelTab}`}>
             {panelTab === "overview" && (
               <div className="pl-tab-body">
                 <div className="pl-budget">
                   <div className="pl-budget-top">
                     <span className="pl-label">Budget</span>
-                    <span>{stage >= 4 ? `${usd.format(plan.totals.total)} / ${usd.format(plan.prefs.budget)}` : stage > 0 ? "Calculating…" : "Waiting for answers"}</span>
+                    <span>{stage >= 4 ? `${usd.format(plan.totals.total)} / ${usd.format(plan.prefs.budget)}` : stage > 0 || (busy && qIndex === null) ? "Calculating…" : "Waiting for answers"}</span>
                   </div>
                   <div className={`budget-bar ${plan.underBy < 0 && stage >= 4 ? "is-over" : ""}`}>
                     <i style={{ width: stage >= 4 ? `${Math.min(100, (plan.totals.total / plan.prefs.budget) * 100)}%` : `${stage * 16}%` }} />
@@ -1093,7 +1152,7 @@ export function Planner() {
               <div className="pl-tab-body">
                 <div className="pl-map">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/images/app-map.webp" alt="Map placeholder" />
+                  <img src="/images/app-map.webp" alt="Illustrative map of the area, not to scale" />
                   {[plan.hotel.area, ...plan.activities.map((a) => a.title)].slice(0, 4).map((label, i) => (
                     <span key={label} style={{ left: `${24 + i * 15}%`, top: `${30 + ((i * 17) % 40)}%` }}>
                       {label}
@@ -1102,6 +1161,7 @@ export function Planner() {
                 </div>
               </div>
             )}
+            </div>
             {planned && (
               <div className="pl-panel-cta">
                 <Link href="/trip" className="btn btn-ghost btn-sm">
@@ -1155,7 +1215,7 @@ function AgentBlock({
 
   if (block.kind === "typing") {
     return (
-      <span className="pl-typing" aria-label="Agent is typing">
+      <span className="pl-typing" aria-hidden="true">
         <i />
         <i />
         <i />
@@ -1254,7 +1314,7 @@ function AgentBlock({
     return (
       <div className="pl-options-card">
         <p className="pl-card-title">
-          <Icon name="plane" size={15} /> Live fares · {plan.originCode} ⇄ {dest.airport} · {plan.prefs.travelers} {plan.prefs.travelers > 1 ? "travellers" : "traveller"}
+          <Icon name="plane" size={15} /> Live fares · {lv.flights[0]?.from ?? plan.originCode} ⇄ {lv.flights[0]?.to ?? dest.airport} · {plan.prefs.travelers} {plan.prefs.travelers > 1 ? "travellers" : "traveller"}
         </p>
         <div className="pl-flights pl-flights-live">
           {lv.flights.map((f) => (

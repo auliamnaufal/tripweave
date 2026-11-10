@@ -43,8 +43,10 @@
   font-size: 14px;
   transition: color 0.2s ease;
 }
-.app-back:hover {
-  color: var(--ink);
+@media (hover: hover) {
+  .app-back:hover {
+    color: var(--ink);
+  }
 }
 .app-avatar {
   width: 36px;
@@ -85,13 +87,53 @@
   border-radius: 2px;
   background: var(--ember);
 }
+.app-topbar .chip.is-on {
+  color: var(--ember-deep);
+  border-color: color-mix(in srgb, var(--ember) 40%, transparent);
+}
+.app-topbar .chip.is-on .i-f {
+  fill: var(--ember);
+  fill-opacity: 1;
+}
 @media (max-width: 640px) {
-  .app-back span,
   .app-topbar .logo span {
     display: none;
   }
+  /* Visually hidden, still the link's accessible name */
+  .app-back span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
   .app-topbar-right .chip {
     padding: 0 10px;
+  }
+  .app-topbar-left {
+    gap: 12px;
+  }
+  .app-back {
+    padding-left: 12px;
+  }
+}
+@media (max-width: 420px) {
+  .app-topbar .chip-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .app-topbar-right .chip {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+  .trip-subnav-total {
+    display: none;
   }
 }
 
@@ -198,6 +240,9 @@
   align-items: start;
   padding-top: 56px;
 }
+.trip-section {
+  scroll-margin-top: 140px;
+}
 .trip-section + .trip-section {
   margin-top: 88px;
 }
@@ -269,9 +314,11 @@
   border: 1px solid var(--line);
   transition: transform 0.4s var(--ease-out), box-shadow 0.3s ease;
 }
-.trip-item:hover {
-  transform: translateX(4px);
-  box-shadow: var(--shadow-1);
+@media (hover: hover) {
+  .trip-item:hover {
+    transform: translateX(4px);
+    box-shadow: var(--shadow-1);
+  }
 }
 .trip-item time {
   font-family: var(--font-mono-stack);
@@ -530,6 +577,9 @@
   margin: 16px 0 22px;
   color: #2f7a52;
   font-size: 14px;
+}
+.trip-under.is-over {
+  color: var(--ember-deep);
 }
 .trip-stack {
   display: flex;
@@ -826,6 +876,35 @@
   margin-top: 10px;
   color: var(--on-dark-soft);
   font-size: 13px;
+}
+.co-pay-error {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(201, 81, 42, 0.16);
+  border: 1px solid rgba(255, 138, 92, 0.45);
+  color: var(--on-dark);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.co-pay-error button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #ffb08f;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.co-card h2:focus {
+  outline: none;
+}
+.co-card h2:focus-visible {
+  outline: 2px solid var(--ember);
 }
 .co-assure {
   display: grid;

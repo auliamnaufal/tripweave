@@ -7,7 +7,10 @@ import { AppTopbar } from "@/components/app/AppTopbar";
 import { DocumentsPanel } from "@/components/app/TravelDocs";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
-import { buildPlan, destinations, getDestination } from "@/features/ui-mock/destinations";
+import { destinations, getDestination } from "@/features/ui-mock/destinations";
+import { useTripView } from "@/features/live/useTripView";
+import { tabKeys } from "@/components/app/tabKeys";
+import type { Order } from "@/features/ui-mock/tripStore";
 import {
   historyStore,
   ordersStore,
@@ -20,7 +23,7 @@ import {
   useUser,
   userStore,
 } from "@/features/ui-mock/tripStore";
-import { gsap, useGSAP } from "@/lib/gsap";
+import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 
 type Tab = "trips" | "saved" | "documents" | "preferences" | "payments" | "settings";
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
@@ -72,7 +75,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
   const history = useHistory();
   const orders = useOrders();
   const saved = useSaved();
-  const current = buildPlan(prefs);
+  const current = useTripView();
+  const [undo, setUndo] = useState<{ label: string; restore: () => void } | null>(null);
   const [picked, setPicked] = useState<string[]>(prefs.vibes.length ? prefs.vibes : ["Slow mornings", "Food first"]);
   const [diet, setDiet] = useState("No restrictions");
   const [seat, setSeat] = useState<"Window" | "Aisle">("Window");
@@ -83,6 +87,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
 
   useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       gsap.from(".ac-head > *", { y: 24, opacity: 0, stagger: 0.07, duration: 1, ease: "expo.out" });
       gsap.from(".ac-tabs button", { y: 10, opacity: 0, stagger: 0.04, duration: 0.8, ease: "expo.out", delay: 0.2 });
     },
@@ -90,10 +95,35 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
   );
   useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       gsap.from(".ac-panel > *", { y: 20, opacity: 0, stagger: 0.05, duration: 0.8, ease: "expo.out" });
     },
     { scope: root, dependencies: [tab] },
   );
+
+  function clearWithUndo<T>(label: string, store: { get: () => T; set: (v: T) => void; clear: () => void }) {
+    const before = store.get();
+    store.clear();
+    setUndo({ label, restore: () => store.set(before) });
+  }
+
+  function downloadReceipt(o: Order) {
+    const text = [
+      "Tripweave receipt (demo)",
+      `Order: ${o.id}`,
+      `Trip: ${o.title}`,
+      `Date: ${new Date(o.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
+      `Bookings: ${o.items}`,
+      `Total: ${usd.format(o.total)}`,
+      "Paid once with PayPal.",
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tripweave-receipt-${o.id}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   function signOut() {
     userStore.clear();
@@ -131,34 +161,60 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
           </dl>
         </header>
 
-        <nav className="ac-tabs" role="tablist" aria-label="Account sections">
+        <div className="ac-tabs" role="tablist" aria-label="Account sections">
           {tabs.map((t) => (
-            <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? "is-active" : ""} onClick={() => setTab(t.id)}>
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`ac-tab-${t.id}`}
+              data-tab={t.id}
+              aria-selected={tab === t.id}
+              aria-controls="ac-panel"
+              tabIndex={tab === t.id ? 0 : -1}
+              className={tab === t.id ? "is-active" : ""}
+              onClick={() => setTab(t.id)}
+              onKeyDown={(e) => tabKeys(e, tabs.map((x) => x.id), tab, setTab)}
+            >
               <Icon name={t.icon} size={16} />
               {t.label}
             </button>
           ))}
-        </nav>
+        </div>
 
-        <section className="ac-panel" key={tab}>
+        <section className="ac-panel" key={tab} id="ac-panel" role="tabpanel" aria-labelledby={`ac-tab-${tab}`}>
+          {undo && (
+            <p className="ac-undo" role="status">
+              {undo.label}{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  undo.restore();
+                  setUndo(null);
+                }}
+              >
+                Undo
+              </button>
+            </p>
+          )}
           {tab === "trips" && (
             <>
+              {history.length > 0 && (
+              <>
               <h2 className="ac-h2">Current plan</h2>
               <article className="ac-trip ac-trip-current">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={current.dest.hero} alt="" />
+                <img src={current.hero} alt="" />
                 <div className="ac-trip-body">
                   <span className={`ac-status ${orders.some((o) => o.destId === prefs.destId) ? "is-booked" : ""}`}>
                     {orders.some((o) => o.destId === prefs.destId) ? "Booked" : "Planned, not paid"}
                   </span>
-                  <h3>
-                    {prefs.nights} nights in {current.dest.name}
-                  </h3>
+                  <h3>{current.title}</h3>
                   <p>
-                    {prefs.when} · {prefs.travelerLabel} · {current.hotel.name}
+                    {current.dates} · {current.travelers} {current.travelers === 1 ? "traveller" : "travellers"} · {current.hotel.name}
                   </p>
                   <div className="ac-trip-foot">
-                    <b>{usd.format(current.totals.total)}</b>
+                    <b>{usd.format(current.total)}</b>
                     <div>
                       <Link href="/trip" className="btn btn-sm btn-ghost">
                         Itinerary
@@ -172,6 +228,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                   </div>
                 </div>
               </article>
+              </>
+              )}
 
               <h2 className="ac-h2">Recent plans</h2>
               {history.length === 0 ? (
@@ -196,7 +254,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 </div>
               )}
               {history.length > 0 && (
-                <button type="button" className="ac-link" onClick={() => historyStore.clear()}>
+                <button type="button" className="ac-link" onClick={() => clearWithUndo("Recent plans cleared.", historyStore)}>
                   Clear recent plans
                 </button>
               )}
@@ -250,7 +308,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 <p>The agent starts every plan from these.</p>
                 <div className="ac-chips">
                   {styles.map((s) => (
-                    <button key={s} type="button" className={picked.includes(s) ? "is-on" : ""} onClick={() => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]))}>
+                    <button key={s} type="button" aria-pressed={picked.includes(s)} className={picked.includes(s) ? "is-on" : ""} onClick={() => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]))}>
+                      {picked.includes(s) && <Icon name="check" size={12} />}
                       {s}
                     </button>
                   ))}
@@ -276,7 +335,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 <h2 className="ac-h2">Seat</h2>
                 <div className="ac-seg">
                   {(["Window", "Aisle"] as const).map((s) => (
-                    <button key={s} type="button" className={seat === s ? "is-on" : ""} onClick={() => setSeat(s)}>
+                    <button key={s} type="button" aria-pressed={seat === s} className={seat === s ? "is-on" : ""} onClick={() => setSeat(s)}>
                       {s}
                     </button>
                   ))}
@@ -286,7 +345,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 <h2 className="ac-h2">Food</h2>
                 <div className="ac-chips">
                   {diets.map((d) => (
-                    <button key={d} type="button" className={diet === d ? "is-on" : ""} onClick={() => setDiet(d)}>
+                    <button key={d} type="button" aria-pressed={diet === d} className={diet === d ? "is-on" : ""} onClick={() => setDiet(d)}>
+                      {diet === d && <Icon name="check" size={12} />}
                       {d}
                     </button>
                   ))}
@@ -296,11 +356,13 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 <button type="submit" className="btn">
                   Save preferences
                 </button>
-                {savedNote && (
-                  <span className="ac-saved">
-                    <Icon name="check" size={14} /> Saved
-                  </span>
-                )}
+                <span className="ac-saved" role="status">
+                  {savedNote && (
+                    <>
+                      <Icon name="check" size={14} /> Preferences saved
+                    </>
+                  )}
+                </span>
               </div>
             </form>
           )}
@@ -342,7 +404,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                         <td>{o.items}</td>
                         <td className="ac-mono">{usd.format(o.total)}</td>
                         <td>
-                          <button type="button" className="ac-icon-btn" aria-label="Download receipt">
+                          <button type="button" className="ac-icon-btn" aria-label={`Download receipt for ${o.id}`} onClick={() => downloadReceipt(o)}>
                             <Icon name="download" size={16} />
                           </button>
                         </td>
@@ -352,7 +414,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 </table>
               )}
               {orders.length > 0 && (
-                <button type="button" className="ac-link" onClick={() => ordersStore.clear()}>
+                <button type="button" className="ac-link" onClick={() => clearWithUndo("Demo receipts cleared.", ordersStore)}>
                   Clear demo receipts
                 </button>
               )}

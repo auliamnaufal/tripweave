@@ -11,7 +11,7 @@
   --surface: #fbf9f4;
   --ink: #18201b;
   --ink-soft: #545c55;
-  --ink-faint: #8a8f87;
+  --ink-faint: #61645e; /* was #8a8f87 (3.1:1 on --surface); now passes 4.5:1 on surface, paper and paper-2 */
   --line: rgba(24, 32, 27, 0.12);
   --line-strong: rgba(24, 32, 27, 0.22);
   --ember: #c9512a;
@@ -23,7 +23,8 @@
   --on-dark-soft: rgba(241, 237, 228, 0.62);
   --on-dark-line: rgba(241, 237, 228, 0.16);
 
-  --font-display-stack: var(--font-display), "Times New Roman", serif;
+  /* Ember Night: Geist carries display type too (matches the demo video); Instrument Serif retired. */
+  --font-display-stack: var(--font-sans), system-ui, sans-serif;
   --font-sans-stack: var(--font-sans), system-ui, sans-serif;
   --font-mono-stack: var(--font-mono), ui-monospace, monospace;
 
@@ -129,13 +130,22 @@ p {
 
 .display {
   font-family: var(--font-display-stack);
-  font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 0.95;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1;
 }
 
+/* The accent word is carried by ember color (set per section), not italics */
 .display em {
-  font-style: italic;
+  font-style: normal;
+}
+
+/* Big totals: light weight, tight tracking, steady digits */
+.display.co-total,
+.trip-summary-total .display {
+  font-weight: 300;
+  letter-spacing: -0.06em;
+  font-variant-numeric: tabular-nums;
 }
 
 .mono {
@@ -257,8 +267,10 @@ p {
   font-size: 15px;
   transition: transform 0.4s var(--ease-out), filter 0.2s ease;
 }
-.pay-btn:hover {
-  filter: brightness(0.96);
+@media (hover: hover) {
+  .pay-btn:hover {
+    filter: brightness(0.96);
+  }
 }
 .pay-btn:active {
   transform: scale(0.98);
@@ -305,9 +317,11 @@ p {
   white-space: nowrap;
   transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
-button.chip:hover {
-  border-color: var(--line-strong);
-  color: var(--ink);
+@media (hover: hover) {
+  button.chip:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
 }
 .chip svg {
   width: 14px;

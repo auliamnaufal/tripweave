@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon } from "@/components/brand/Icon";
 import { DEMO_USER, historyStore, userStore } from "@/features/ui-mock/tripStore";
-import { gsap, useGSAP } from "@/lib/gsap";
+import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 
 export function Login() {
   const root = useRef<HTMLDivElement>(null);
@@ -17,6 +17,7 @@ export function Login() {
 
   useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       gsap
         .timeline({ defaults: { ease: "expo.out" } })
         .from(".lg-photo img", { scale: 1.2, duration: 2.2 }, 0)
@@ -76,36 +77,9 @@ export function Login() {
             <span className="lg-demo-arrow">{loading ? <i className="bk-spin" /> : <Icon name="arrow" size={16} />}</span>
           </button>
 
-          <div className="lg-divider">
-            <span>or</span>
-          </div>
-
-          <button type="button" className="lg-oauth" disabled title="Available when the real backend is connected">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-              <path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3Z" />
-              <path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.5l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22Z" />
-              <path fill="#FBBC05" d="M6.4 13.9a6 6 0 0 1 0-3.8V7.5H3.1a10 10 0 0 0 0 9l3.3-2.6Z" />
-              <path fill="#EA4335" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6Z" />
-            </svg>
-            Continue with Google
-          </button>
-
-          <form className="lg-fields" onSubmit={(e) => e.preventDefault()}>
-            <label>
-              <span>Email</span>
-              <input type="email" placeholder="you@example.com" disabled />
-            </label>
-            <label>
-              <span>Password</span>
-              <input type="password" placeholder="••••••••" disabled />
-            </label>
-            <button type="submit" className="btn" disabled>
-              Sign in
-            </button>
-          </form>
           <p className="lg-note">
-            <Icon name="shield" size={14} /> Email and Google sign-in switch on with the real backend. The demo account
-            keeps everything in this browser.
+            <Icon name="shield" size={14} /> Email and Google sign-in arrive with the real backend. The demo account keeps everything in
+            this browser.
           </p>
           <p className="lg-foot">
             New here? <Link href="/plan">Plan a trip without an account</Link>

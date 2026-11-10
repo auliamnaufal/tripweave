@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
@@ -8,10 +8,11 @@ import { usd } from "@/features/ui-mock/data";
 import { createOrder } from "@/features/live/client";
 import { livePaymentStore } from "@/features/live/liveStore";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
-import { useHydrated, useTripPrefs } from "@/features/ui-mock/tripStore";
+import { useDocs, useHydrated, useTripPrefs, useUser } from "@/features/ui-mock/tripStore";
+import { blockers, docMeta } from "@/features/ui-mock/documents";
 import type { TripPrefs } from "@/features/ui-mock/destinations";
 import { DocShareSummary } from "@/components/app/TravelDocs";
-import { gsap, useGSAP } from "@/lib/gsap";
+import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 
 const steps = ["Trip summary", "Review & pay", "Booking"];
 
@@ -30,6 +31,48 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
   const router = useRouter();
   const [paying, setPaying] = useState(false);
   const [pay, setPay] = useState<PayState>({ phase: "idle" });
+  const [docError, setDocError] = useState("");
+  const user = useUser();
+  const docs = useDocs();
+  const missing = blockers(prefs, docs);
+  const docsHeading = useRef<HTMLHeadingElement>(null);
+  const modalCard = useRef<HTMLDivElement>(null);
+  const payButton = useRef<HTMLButtonElement>(null);
+  const people = `${view.travelers} ${view.travelers === 1 ? "traveller" : "travellers"}`;
+
+  // Modal: move focus in, close on Escape, give focus back to the pay button.
+  useEffect(() => {
+    if (pay.phase === "idle") return;
+    const target = modalCard.current?.querySelector<HTMLElement>("button, a") ?? modalCard.current;
+    target?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && pay.phase !== "creating") closeModal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pay.phase]);
+
+  function closeModal() {
+    setPay({ phase: "idle" });
+    // Wait one task so the page is no longer inert before focusing.
+    window.setTimeout(() => payButton.current?.focus(), 0);
+  }
+
+  function onPay() {
+    if (missing.length) {
+      const names = missing.map((r) => docMeta[r.req.kind].label.toLowerCase());
+      setDocError(`Add your ${names.join(" and ")} first. The airline and hotel need ${names.length > 1 ? "them" : "it"} to book.`);
+      return;
+    }
+    setDocError("");
+    if (live) void payLive();
+    else payDemo();
+  }
+
+  function goToDocs() {
+    docsHeading.current?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    docsHeading.current?.focus({ preventScroll: true });
+  }
   const live = isLive(view);
   const under = view.budget - view.total;
   const total = view.total;
@@ -41,6 +84,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
 
   const { contextSafe } = useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       gsap.from(".co-step", { y: 10, opacity: 0, stagger: 0.08, duration: 0.8, ease: "expo.out" });
       gsap.from(".co-col > *", { y: 40, opacity: 0, stagger: 0.08, duration: 1.1, ease: "expo.out", delay: 0.15 });
     },
@@ -65,6 +109,10 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
 
   const payDemo = contextSafe(() => {
     setPaying(true);
+    if (prefersReducedMotion()) {
+      window.setTimeout(() => router.push("/booked"), 900);
+      return;
+    }
     gsap
       .timeline({ onComplete: () => router.push("/booked") })
       .fromTo(".co-overlay", { clipPath: "circle(0% at 50% 50%)" }, { clipPath: "circle(150% at 50% 50%)", duration: 1, ease: "power3.inOut" })
@@ -74,6 +122,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
 
   return (
     <div ref={root} className="co-page">
+      <div className="co-page-body" inert={pay.phase !== "idle" || paying}>
       <AppTopbar back={{ href: "/trip", label: "Back to plan" }} />
       <div className="app-wrap">
         <ol className="co-steps" aria-label="Progress">
@@ -96,7 +145,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
               <div>
                 <b>{view.title}</b>
                 <span>
-                  {view.dates} · {view.travelers} travellers
+                  {view.dates} · {people}
                 </span>
               </div>
             </article>
@@ -106,25 +155,29 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
               <div className="co-fields">
                 <label>
                   <span>Full name</span>
-                  <input defaultValue="Mara Okafor" />
+                  <input name="name" autoComplete="name" defaultValue={user?.name ?? ""} placeholder="Mara Okafor" />
                 </label>
                 <label>
                   <span>Email for confirmations</span>
-                  <input type="email" defaultValue="mara@example.com" />
+                  <input type="email" name="email" autoComplete="email" defaultValue={user?.email ?? ""} placeholder="you@example.com" />
                 </label>
-                <label>
-                  <span>Second traveller</span>
-                  <input defaultValue="Daniel Reyes" />
-                </label>
+                {view.travelers > 1 && (
+                  <label>
+                    <span>Second traveller</span>
+                    <input name="traveller-2" autoComplete="off" placeholder="Daniel Reyes" />
+                  </label>
+                )}
                 <label>
                   <span>Phone (optional)</span>
-                  <input placeholder="+1 555 010 0199" />
+                  <input type="tel" name="phone" autoComplete="tel" placeholder="+1 555 010 0199" />
                 </label>
               </div>
             </section>
 
             <section className="co-card">
-              <h2>Travel documents</h2>
+              <h2 ref={docsHeading} tabIndex={-1}>
+                Travel documents
+              </h2>
               <DocShareSummary prefs={prefs} suppliers={[view.flights[0]?.airline, view.hotel.name].filter(Boolean)} />
             </section>
 
@@ -151,8 +204,8 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
             <div className="co-pay">
               <span className="mono">Total due today</span>
               <b className="co-total display">{usd.format(total)}</b>
-              <div className="budget-bar">
-                <i style={{ width: `${(total / view.budget) * 100}%` }} />
+              <div className={`budget-bar ${under < 0 ? "is-over" : ""}`}>
+                <i style={{ width: `${Math.min(100, (total / view.budget) * 100)}%` }} />
               </div>
               <p className="co-under">
                 {under >= 0 ? `${usd.format(under)} under budget` : `${usd.format(-under)} over budget`} · {live ? "live plan from the agent" : "sample plan"}
@@ -168,7 +221,15 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                   <Icon name="refresh" size={16} /> Any booking that fails is refunded automatically
                 </li>
               </ul>
-              <button type="button" className="pay-btn" onClick={live ? () => void payLive() : payDemo} disabled={paying || pay.phase === "creating"}>
+              {docError && (
+                <div className="co-pay-error" role="alert">
+                  <span>{docError}</span>
+                  <button type="button" onClick={goToDocs}>
+                    Go to travel documents
+                  </button>
+                </div>
+              )}
+              <button ref={payButton} type="button" className="pay-btn" onClick={onPay} disabled={paying || pay.phase === "creating"}>
                 Pay with{" "}
                 <b>
                   <span>Pay</span>
@@ -185,9 +246,11 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
         </div>
       </div>
 
+      </div>
+
       {pay.phase !== "idle" && (
         <div className="co-modal" role="dialog" aria-modal="true" aria-labelledby="co-modal-title">
-          <div className="co-modal-card">
+          <div className="co-modal-card" ref={modalCard} tabIndex={-1}>
             {pay.phase === "creating" && (
               <>
                 <span className="co-knot" aria-hidden="true" />
@@ -216,7 +279,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                     Reopen PayPal
                   </a>
                 </div>
-                <button type="button" className="co-modal-cancel" onClick={() => setPay({ phase: "idle" })}>
+                <button type="button" className="co-modal-cancel" onClick={closeModal}>
                   Cancel
                 </button>
               </>
@@ -229,7 +292,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                 <h2 id="co-modal-title">PayPal didn’t answer</h2>
                 <p>{pay.message}</p>
                 <div className="co-modal-actions">
-                  <button type="button" className="btn" onClick={() => setPay({ phase: "idle" })}>
+                  <button type="button" className="btn" onClick={closeModal}>
                     Back to checkout
                   </button>
                 </div>
