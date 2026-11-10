@@ -56,9 +56,9 @@ function orderDetail(status: string, units: { referenceId: string; amountValue: 
 /**
  * Shape actually returned by POST /orders/{id}/capture — unlike GET, a unit does
  * NOT echo its own top-level amount; only payments.captures[0].amount is
- * present. Matches the real, verified single-unit and multi-payee ("Capstone
- * test") capture payloads in
- * docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+ * present, per PayPal's own documented single-unit and multi-payee capture
+ * response shape. See docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md
+ * for the unit-tested-but-not-yet-live-verified status of the multi-payee case.
  */
 function captureResponse(
   status: string,
@@ -150,7 +150,7 @@ describe("createPlanOrder", () => {
     expect(unit.amount.breakdown.item_total.value).toBe(unit.amount.value);
   });
 
-  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching the live Capstone test shape", async () => {
+  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching PayPal's documented multi-payee shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(jsonResponse({ id: "order-2", status: "PAYER_ACTION_REQUIRED", links: [{ rel: "payer-action", href: "x" }] }));
@@ -252,7 +252,7 @@ describe("capturePlanOrder", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports every purchase unit from a multi-payee capture, matching the live Capstone test result", async () => {
+  it("reports every purchase unit from a multi-payee capture, matching PayPal's documented capture response shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(
@@ -315,6 +315,20 @@ describe("refundCapture", () => {
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url).toBe("https://api-m.sandbox.paypal.com/v2/payments/captures/capture-1/refund");
     expect(JSON.parse(init.body as string)).toEqual({ amount: { currency_code: "USD", value: "95.00" } });
+  });
+
+  it("passes an optional reason through as PayPal's note_to_payer", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "refund-1", status: "COMPLETED" }));
+
+    await refundCapture("capture-1", 9500, { reason: "Supplier booking failed" });
+
+    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      amount: { currency_code: "USD", value: "95.00" },
+      note_to_payer: "Supplier booking failed",
+    });
   });
 });
 

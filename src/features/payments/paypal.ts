@@ -83,8 +83,8 @@ function wireItems(offers: readonly TravelOffer[]) {
     }));
 }
 
-// Payee shape matches the one proven live in the "Capstone test" of
-// docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+// Payee shape follows PayPal's documented Orders v2 multi-payee shape; see
+// docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md.
 function toWirePurchaseUnit(plan: PurchaseUnitPlan, customId?: string) {
   const items = wireItems(plan.offers);
   return {
@@ -314,7 +314,7 @@ export async function verifyWebhookSignature(
 export async function refundCapture(
   captureId: string,
   amountMinorUnits: number,
-  options: PayPalCallOptions = {},
+  options: PayPalCallOptions & { reason?: string } = {},
 ): Promise<{ status: string; refundId: string }> {
   const token = await accessToken();
   const response = await fetch(`${baseUrl()}/v2/payments/captures/${captureId}/refund`, {
@@ -322,6 +322,7 @@ export async function refundCapture(
     headers: jsonHeaders(token, options.requestId),
     body: JSON.stringify({
       amount: { currency_code: "USD", value: (amountMinorUnits / 100).toFixed(2) },
+      ...(options.reason ? { note_to_payer: options.reason } : {}),
     }),
   });
   if (!response.ok) throw new Error("PayPal refund failed.");
