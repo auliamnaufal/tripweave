@@ -58,8 +58,9 @@ function planPurchaseUnits(offers: readonly TravelOffer[]): PurchaseUnitPlan[] {
   return directUnits;
 }
 
-// Matches the exact shape proven live in the "Capstone test" of
-// docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+// Matches PayPal's documented Orders v2 multi-payee purchase-unit shape —
+// see docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md, including
+// its note that this is unit-tested but not yet verified in a live sandbox run.
 function toWirePurchaseUnit(plan: PurchaseUnitPlan) {
   return {
     reference_id: plan.referenceId,

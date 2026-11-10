@@ -56,9 +56,9 @@ function orderDetail(status: string, units: { referenceId: string; amountValue: 
 /**
  * Shape actually returned by POST /orders/{id}/capture — unlike GET, a unit does
  * NOT echo its own top-level amount; only payments.captures[0].amount is
- * present. Matches the real, verified single-unit and multi-payee ("Capstone
- * test") capture payloads in
- * docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+ * present, per PayPal's own documented single-unit and multi-payee capture
+ * response shape. See docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md
+ * for the unit-tested-but-not-yet-live-verified status of the multi-payee case.
  */
 function captureResponse(
   status: string,
@@ -108,7 +108,7 @@ describe("createPlanOrder", () => {
     });
   });
 
-  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching the live Capstone test shape", async () => {
+  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching PayPal's documented multi-payee shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(
@@ -215,7 +215,7 @@ describe("capturePlanOrder", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports every purchase unit from a multi-payee capture, matching the live Capstone test result", async () => {
+  it("reports every purchase unit from a multi-payee capture, matching PayPal's documented capture response shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(

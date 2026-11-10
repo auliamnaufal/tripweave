@@ -1,5 +1,5 @@
 ---
-status: partially superseded by ADR-0002 — see that ADR for live sandbox evidence that direct supplier payment is achievable for suppliers willing to share their own PayPal email, without partner approval. The reasoning below still holds for airlines (IATA BSP, unrelated to PayPal) and for any supplier unwilling/unable to share a PayPal account.
+status: partially superseded by ADR-0002 for suppliers willing to share their own PayPal email — see that ADR, including its verification-status note (the mechanism is implemented and unit-tested, not yet proven in a live sandbox run; that's tracked separately as GitHub issue #3). The reasoning below still holds fully for airlines (IATA BSP, unrelated to PayPal) and for any supplier unwilling/unable to share a PayPal account.
 ---
 
 # Trip Order pays Tripweave, not the supplier directly
