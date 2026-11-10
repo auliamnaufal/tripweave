@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
@@ -18,7 +18,7 @@ import {
   type TripPrefs,
 } from "@/features/ui-mock/destinations";
 import { acknowledgements, applyAnswer, planSummary, questions, suggestionsFor, type QuestionId } from "@/features/ui-mock/agentScript";
-import { docsStore, historyStore, savedStore, tripStore, useDocs, useHistory, useSaved, useUser } from "@/features/ui-mock/tripStore";
+import { docsStore, historyStore, savedStore, tripStore, useDocs, useHistory, useHydrated, useSaved, useUser } from "@/features/ui-mock/tripStore";
 import { tabKeys } from "@/components/app/tabKeys";
 import {
   blockers,
@@ -110,7 +110,10 @@ const stamp = () => ({ id: String(Date.now()), at: new Date().toISOString() });
 
 export function Planner() {
   const params = useSearchParams();
+  const router = useRouter();
   const user = useUser();
+  const hydrated = useHydrated();
+  const ready = hydrated && !!user;
   const history = useHistory();
   const firstName = user?.firstName ?? "there";
 
@@ -175,12 +178,12 @@ export function Planner() {
 
   useGSAP(
     () => {
-      if (prefersReducedMotion()) return;
+      if (!ready || prefersReducedMotion()) return;
       gsap.from(".pl-side > *", { x: -16, opacity: 0, stagger: 0.04, duration: 0.8, ease: "expo.out" });
       gsap.from(".pl-welcome > *", { y: 28, opacity: 0, stagger: 0.07, duration: 1.1, ease: "expo.out", delay: 0.1 });
       gsap.from(".pl-place", { y: 30, opacity: 0, stagger: 0.05, duration: 1, ease: "expo.out", delay: 0.35 });
     },
-    { scope: root },
+    { scope: root, dependencies: [ready] },
   );
 
   const push = useCallback((b: Block) => setBlocks((prev) => [...prev, b]), []);
@@ -730,18 +733,29 @@ export function Planner() {
     setSuggestions([]);
   }
 
+  // The demo has one account: a signed-out visitor sees the sign-in page first, then comes back here.
   useEffect(() => {
+    if (!hydrated || user) return;
+    const q = params.get("q");
+    router.replace(`/login?next=${encodeURIComponent(q ? `/plan?q=${encodeURIComponent(q)}` : "/plan")}`);
+  }, [hydrated, user, params, router]);
+
+  useEffect(() => {
+    if (!ready) return;
     const q = params.get("q");
     if (q && !started.current) {
       started.current = true;
       void start(q);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params]);
+  }, [params, ready]);
 
   const activeQuestion = qIndex !== null ? questions[qIndex] : null;
   const placeholder = activeQuestion ? activeQuestion.placeholder : busy ? "The planner is working…" : planned ? "Ask for a change: cheaper, slower, more food…" : "Name a place…";
   const destSaved = dest ? saved.includes(dest.id) : false;
+
+  // Hold an empty shell until we know who is here, so a signed-out visitor never sees the planner flash before sign-in.
+  if (!ready) return <div ref={root} className="pl" aria-busy="true" />;
 
   return (
     <div ref={root} className={`pl ${collapsed ? "is-collapsed" : ""}`}>

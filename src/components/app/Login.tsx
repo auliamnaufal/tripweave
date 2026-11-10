@@ -12,7 +12,9 @@ export function Login() {
   const root = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") ?? "/plan";
+  const asked = params.get("next");
+  // Only follow paths inside this site ("/plan", not "//evil.example").
+  const next = asked && asked.startsWith("/") && !asked.startsWith("//") ? asked : "/plan";
   const [loading, setLoading] = useState(false);
 
   useGSAP(
@@ -82,7 +84,7 @@ export function Login() {
             this browser.
           </p>
           <p className="lg-foot">
-            New here? <Link href="/plan">Plan a trip without an account</Link>
+            Just looking? <Link href="/">Back to the home page</Link>
           </p>
         </div>
       </main>
