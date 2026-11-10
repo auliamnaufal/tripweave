@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tripweave-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "pnpm@10.34.4", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "video-options",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "http-server@14.1.1", "videos", "-p", "8766", "-c-1", "-s"],
+      "port": 8766
+    },
+    {
+      "name": "tripweave-attach",
+      "url": "http://localhost:3000",
+      "port": 3000
+    }
+  ]
+}

@@ -23,8 +23,7 @@
   --on-dark-soft: rgba(241, 237, 228, 0.62);
   --on-dark-line: rgba(241, 237, 228, 0.16);
 
-  /* Ember Night: Geist carries display type too (matches the demo video); Instrument Serif retired. */
-  --font-display-stack: var(--font-sans), system-ui, sans-serif;
+  --font-display-stack: var(--font-display), "Times New Roman", serif;
   --font-sans-stack: var(--font-sans), system-ui, sans-serif;
   --font-mono-stack: var(--font-mono), ui-monospace, monospace;
 
@@ -130,18 +129,31 @@ p {
 
 .display {
   font-family: var(--font-display-stack);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+}
+
+.display em {
+  font-style: italic;
+}
+
+/* App screens (planner, trip, checkout, booked, account, sign-in, legal) use Geist for display type,
+   matching the demo video (Ember Night). The landing page keeps Instrument Serif. */
+:is(.pl, .trip-page, .co-page, .bk-page, .ac-page, .lg, .lg-page) {
+  --font-display-stack: var(--font-sans), system-ui, sans-serif;
+}
+:is(.pl, .trip-page, .co-page, .bk-page, .ac-page, .lg, .lg-page) .display {
   font-weight: 500;
   letter-spacing: -0.045em;
   line-height: 1;
 }
-
-/* The accent word is carried by ember color (set per section), not italics */
-.display em {
+/* The accent word is carried by ember color, not italics */
+:is(.pl, .trip-page, .co-page, .bk-page, .ac-page, .lg, .lg-page) .display em {
   font-style: normal;
 }
-
 /* Big totals: light weight, tight tracking, steady digits */
-.display.co-total,
+.co-page .display.co-total,
 .trip-summary-total .display {
   font-weight: 300;
   letter-spacing: -0.06em;
