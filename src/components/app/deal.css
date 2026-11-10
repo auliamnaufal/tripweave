@@ -186,3 +186,56 @@
     text-align: left;
   }
 }
+
+/* PayPal sandbox test buyer, shown on the checkout approval step */
+.sbx {
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+
+.sbx-title,
+.sbx-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.sbx-field {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.sbx-label {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
+.sbx-value {
+  font: 500 0.82rem/1.3 var(--font-mono-stack);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.sbx-copy {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sbx-copy:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}

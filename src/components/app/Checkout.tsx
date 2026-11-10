@@ -8,6 +8,7 @@ import { usd } from "@/features/ui-mock/data";
 import { createOrder, OrderError } from "@/features/live/client";
 import { livePaymentStore, livePlanStore } from "@/features/live/liveStore";
 import { isPayPalReturnMessage } from "@/features/live/paypalReturn";
+import { SandboxBuyer } from "@/components/app/SandboxBuyer";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
 import { useDocs, useHydrated, useTripPrefs, useUser } from "@/features/ui-mock/tripStore";
 import { blockers, docMeta } from "@/features/ui-mock/documents";
@@ -288,9 +289,10 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                 </span>
                 <h2 id="co-modal-title">Approve it in the PayPal window</h2>
                 <p>
-                  Log in with a PayPal <b>sandbox buyer</b> account and press Pay Now. This page continues on its own
-                  once PayPal sends you back, then captures the payment and books each supplier.
+                  One approval covers the whole trip. As soon as PayPal sends you back, Tripweave captures the payment and
+                  books every item with its platform.
                 </p>
+                <SandboxBuyer />
                 <div className="co-modal-actions">
                   <button type="button" className="btn btn-ember" onClick={() => router.push("/booked")}>
                     Already approved? Continue
