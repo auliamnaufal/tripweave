@@ -58,8 +58,9 @@ function planPurchaseUnits(offers: readonly TravelOffer[]): PurchaseUnitPlan[] {
   return directUnits;
 }
 
-// Matches the exact shape proven live in the "Capstone test" of
-// docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+// Matches PayPal's documented Orders v2 multi-payee purchase-unit shape —
+// see docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md, including
+// its note that this is unit-tested but not yet verified in a live sandbox run.
 function toWirePurchaseUnit(plan: PurchaseUnitPlan) {
   return {
     reference_id: plan.referenceId,
@@ -183,6 +184,7 @@ export async function capturePlanOrder(orderId: string): Promise<PlanOrderStatus
 export async function refundCapture(
   captureId: string,
   amountMinorUnits: number,
+  reason?: string,
 ): Promise<{ status: string; refundId: string }> {
   const token = await accessToken();
   const response = await fetch(`${baseUrl()}/v2/payments/captures/${captureId}/refund`, {
@@ -193,9 +195,47 @@ export async function refundCapture(
     },
     body: JSON.stringify({
       amount: { currency_code: "USD", value: (amountMinorUnits / 100).toFixed(2) },
+      ...(reason ? { note_to_payer: reason } : {}),
     }),
   });
   if (!response.ok) throw new Error("PayPal refund failed.");
   const result = (await response.json()) as { id: string; status: string };
   return { status: result.status, refundId: result.id };
+}
+
+/** The PAYPAL-* transmission headers PayPal sends on every webhook delivery. */
+export type WebhookTransmissionHeaders = {
+  authAlgo: string;
+  certUrl: string;
+  transmissionId: string;
+  transmissionSig: string;
+  transmissionTime: string;
+};
+
+export async function verifyWebhookSignature(
+  headers: WebhookTransmissionHeaders,
+  event: unknown,
+): Promise<boolean> {
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  if (!webhookId) throw new Error("PayPal webhook is not configured.");
+  const token = await accessToken();
+  const response = await fetch(`${baseUrl()}/v1/notifications/verify-webhook-signature`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      auth_algo: headers.authAlgo,
+      cert_url: headers.certUrl,
+      transmission_id: headers.transmissionId,
+      transmission_sig: headers.transmissionSig,
+      transmission_time: headers.transmissionTime,
+      webhook_id: webhookId,
+      webhook_event: event,
+    }),
+  });
+  if (!response.ok) throw new Error("PayPal webhook verification failed.");
+  const result = (await response.json()) as { verification_status: string };
+  return result.verification_status === "SUCCESS";
 }

@@ -27,7 +27,7 @@ export type CaptureStreamEvent =
   // Real money paid straight to an Onboarded Supplier's own PayPal account, as
   // its own purchase unit on this same order. Reported honestly: PayPal's own
   // capture status for that unit, which can land PENDING/PENDING_REVIEW rather
-  // than COMPLETED (see docs/research/live-sandbox-third-party-payee-test-2026-11-09.md).
+  // than COMPLETED (see docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md).
   | { kind: "direct-payment"; offerId: string; status: string; reason?: string; amountMinorUnits: number }
   | { kind: "refund"; offerId: string; amountMinorUnits: number; status: string }
   | {

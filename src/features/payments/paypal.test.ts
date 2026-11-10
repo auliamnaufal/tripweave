@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { capturePlanOrder, createPlanOrder, refundCapture } from "./paypal";
+import { capturePlanOrder, createPlanOrder, refundCapture, verifyWebhookSignature } from "./paypal";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 
@@ -56,9 +56,9 @@ function orderDetail(status: string, units: { referenceId: string; amountValue: 
 /**
  * Shape actually returned by POST /orders/{id}/capture — unlike GET, a unit does
  * NOT echo its own top-level amount; only payments.captures[0].amount is
- * present. Matches the real, verified single-unit and multi-payee ("Capstone
- * test") capture payloads in
- * docs/research/live-sandbox-third-party-payee-test-2026-11-09.md.
+ * present, per PayPal's own documented single-unit and multi-payee capture
+ * response shape. See docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md
+ * for the unit-tested-but-not-yet-live-verified status of the multi-payee case.
  */
 function captureResponse(
   status: string,
@@ -108,7 +108,7 @@ describe("createPlanOrder", () => {
     });
   });
 
-  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching the live Capstone test shape", async () => {
+  it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching PayPal's documented multi-payee shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(
@@ -215,7 +215,7 @@ describe("capturePlanOrder", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports every purchase unit from a multi-payee capture, matching the live Capstone test result", async () => {
+  it("reports every purchase unit from a multi-payee capture, matching PayPal's documented capture response shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(
@@ -278,5 +278,63 @@ describe("refundCapture", () => {
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url).toBe("https://api-m.sandbox.paypal.com/v2/payments/captures/capture-1/refund");
     expect(JSON.parse(init.body as string)).toEqual({ amount: { currency_code: "USD", value: "95.00" } });
+  });
+
+  it("passes an optional reason through as PayPal's note_to_payer", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "refund-1", status: "COMPLETED" }));
+
+    await refundCapture("capture-1", 9500, "Supplier booking failed");
+
+    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      amount: { currency_code: "USD", value: "95.00" },
+      note_to_payer: "Supplier booking failed",
+    });
+  });
+});
+
+describe("verifyWebhookSignature", () => {
+  const headers = {
+    authAlgo: "SHA256withRSA",
+    certUrl: "https://api.sandbox.paypal.com/cert",
+    transmissionId: "txn-1",
+    transmissionSig: "sig",
+    transmissionTime: "2026-11-10T00:00:00Z",
+  };
+  const event = { id: "evt-1", event_type: "PAYMENT.CAPTURE.COMPLETED" };
+
+  beforeEach(() => {
+    process.env.PAYPAL_WEBHOOK_ID = "webhook-1";
+  });
+
+  it("sends the transmission headers and event body to PayPal's verify endpoint", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ verification_status: "SUCCESS" }));
+
+    const result = await verifyWebhookSignature(headers, event);
+
+    expect(result).toBe(true);
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("https://api-m.sandbox.paypal.com/v1/notifications/verify-webhook-signature");
+    expect(JSON.parse(init.body as string)).toEqual({
+      auth_algo: "SHA256withRSA",
+      cert_url: "https://api.sandbox.paypal.com/cert",
+      transmission_id: "txn-1",
+      transmission_sig: "sig",
+      transmission_time: "2026-11-10T00:00:00Z",
+      webhook_id: "webhook-1",
+      webhook_event: event,
+    });
+  });
+
+  it("returns false when PayPal reports the signature as failed", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ verification_status: "FAILURE" }));
+
+    expect(await verifyWebhookSignature(headers, event)).toBe(false);
   });
 });
