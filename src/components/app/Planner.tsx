@@ -20,7 +20,7 @@ import {
   type TripPrefs,
 } from "@/features/ui-mock/destinations";
 import { acknowledgements, applyAnswer, planSummary, questions, suggestionsFor, type QuestionId } from "@/features/ui-mock/agentScript";
-import { docsStore, historyStore, savedStore, tripStore, useDocs, useHistory, useHydrated, useSaved, useUser } from "@/features/ui-mock/tripStore";
+import { docsStore, historyStore, savedStore, tripStore, useDocs, useHydrated, useSaved, useUser } from "@/features/ui-mock/tripStore";
 import { tabKeys } from "@/components/app/tabKeys";
 import {
   blockers,
@@ -44,6 +44,8 @@ import { DealLine } from "@/components/app/DealPanel";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 import { briefFromPrefs, homeOrigin, readTrip, streamPlan, swapOption, type TripBriefWire } from "@/features/live/client";
 import { LiveOptions } from "@/components/app/LiveOptions";
+import { AppSidebar, MobileNav, useSidebarCollapsed } from "@/components/app/AppSidebar";
+import { AccountMenu } from "@/components/app/AccountMenu";
 import type { AlternativeSlot } from "@/features/suppliers/alternatives";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
 import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
@@ -62,14 +64,6 @@ type Block =
   | { id: string; role: "agent"; kind: "work"; title: string; steps: Step[]; done: boolean }
   | { id: string; role: "agent"; kind: "flights" | "hotels" | "food" | "days" | "plan" | "places" };
 
-const nav: { icon: IconName; label: string; href: string; active?: boolean }[] = [
-  { icon: "chat", label: "Planner", href: "/plan", active: true },
-  { icon: "ticket", label: "My trips", href: "/account?tab=trips" },
-  { icon: "heart", label: "Saved places", href: "/account?tab=saved" },
-  { icon: "passport", label: "Travel documents", href: "/account?tab=documents" },
-  { icon: "globe", label: "Explore", href: "/#journeys" },
-  { icon: "user", label: "Account", href: "/account" },
-];
 
 const toolIcon: Record<string, IconName> = {
   search_flights: "plane",
@@ -120,7 +114,6 @@ export function Planner() {
   const user = useUser();
   const hydrated = useHydrated();
   const ready = hydrated && !!user;
-  const history = useHistory();
   const firstName = user?.firstName ?? "there";
 
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -134,7 +127,8 @@ export function Planner() {
   const [input, setInput] = useState("");
   const [panelTab, setPanelTab] = useState<"overview" | "todo" | "map">("overview");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  // Shared with every app page, so the sidebar keeps its shape as you move around.
+  const collapsed = useSidebarCollapsed();
   const [dragging, setDragging] = useState(false);
   const docs = useDocs();
   const saved = useSaved();
@@ -868,6 +862,12 @@ export function Planner() {
     route(text);
   }
 
+  function openRecent(destId: string) {
+    if (busy) return;
+    reset();
+    void start(getDestination(destId).name);
+  }
+
   function reset() {
     if (busy) return;
     setBlocks([]);
@@ -905,81 +905,18 @@ export function Planner() {
   return (
     <div ref={root} className={`pl ${collapsed ? "is-collapsed" : ""}`}>
       <aside className="pl-side" aria-label="Workspace">
-        <div className="pl-side-top">
-          <Link href="/plan" className="logo pl-logo" aria-label="Tripweave planner">
-            <LogoMark />
-            <span>Tripweave</span>
-          </Link>
-          <button type="button" className="pl-collapse" onClick={() => setCollapsed((v) => !v)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-            <Icon name="chevron" size={16} />
-          </button>
-        </div>
-        <button type="button" className="pl-new" onClick={reset} data-tip="New trip">
-          <Icon name="plus" size={16} />
-          <span>New trip</span>
-        </button>
-        <nav className="pl-nav">
-          {nav.map((n) => (
-            <Link key={n.label} href={n.href} className={n.active ? "is-active" : ""} data-tip={n.label}>
-              <Icon name={n.icon} size={18} />
-              <span>{n.label}</span>
-            </Link>
-          ))}
-        </nav>
-        <div className="pl-recent">
-          <p className="pl-label">Recent plans</p>
-          {history.length === 0 ? (
-            <p className="pl-recent-empty">No trips yet. Plans you make show up here.</p>
-          ) : (
-            history.map((h) => (
-              <button key={h.id} type="button" onClick={() => !busy && (reset(), void start(getDestination(h.destId).name))}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={getDestination(h.destId).card} alt="" />
-                <span>{h.title}</span>
-              </button>
-            ))
-          )}
-        </div>
-        {user ? (
-          <Link href="/account" className="pl-user" data-tip="Account">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={user.avatar} alt="" />
-            <span>
-              <b>{user.name}</b>
-              <small>Demo account</small>
-            </span>
-          </Link>
-        ) : (
-          <Link href="/login?next=/plan" className="pl-user pl-user-guest" data-tip="Sign in">
-            <span className="pl-user-icon">
-              <Icon name="user" size={18} />
-            </span>
-            <span>
-              <b>Sign in</b>
-              <small>Save trips across devices</small>
-            </span>
-          </Link>
-        )}
+        <AppSidebar onNewTrip={reset} onRecent={openRecent} busy={busy} />
       </aside>
 
       <main className="pl-main">
         <header className="pl-mobilebar">
-          <Link href="/plan" className="logo" aria-label="Tripweave planner">
-            <LogoMark />
-          </Link>
+          <MobileNav onNewTrip={reset} onRecent={openRecent} busy={busy} />
           <span>{dest ? dest.name : "New trip"}</span>
           <div className="pl-mobilebar-actions">
             <button ref={planChip} type="button" className="chip" onClick={() => setPanelOpen(true)} disabled={!dest} aria-expanded={panelOpen}>
               <Icon name="map" /> Plan
             </button>
-            <Link href={user ? "/account" : "/login?next=/plan"} className="pl-mobile-account" aria-label={user ? "Account" : "Sign in"}>
-              {user ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={user.avatar} alt="" />
-              ) : (
-                <Icon name="user" size={18} />
-              )}
-            </Link>
+            <AccountMenu />
           </div>
         </header>
         <p className="sr-only" role="status">

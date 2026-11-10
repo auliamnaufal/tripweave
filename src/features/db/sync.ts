@@ -2,6 +2,7 @@
 
 import type { TripPrefs } from "@/features/ui-mock/destinations";
 import { createClient } from "@/lib/supabase/client";
+import { livePaymentStore, livePlanStore } from "@/features/live/liveStore";
 import { docsStore, historyStore, ordersStore, savedStore, userStore, type DemoUser, type Order } from "@/features/ui-mock/tripStore";
 
 async function getJson<T>(url: string): Promise<T | null> {
@@ -34,6 +35,9 @@ export function clearLocalUserData(): void {
   historyStore.clear();
   savedStore.clear();
   docsStore.clear();
+  // The current plan and payment are personal too: the next person on this browser starts clean.
+  livePlanStore.set(null);
+  livePaymentStore.set(null);
 }
 
 export async function signOut(): Promise<void> {

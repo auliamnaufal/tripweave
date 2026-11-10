@@ -7,6 +7,7 @@ import { Icon } from "@/components/brand/Icon";
 import { gsap, ScrollTrigger, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 import { useUser } from "@/features/ui-mock/tripStore";
+import { AccountMenu, useSignOut } from "@/components/app/AccountMenu";
 
 const links = [
   { href: "#journeys", label: "Journeys" },
@@ -22,6 +23,7 @@ export function SiteNav() {
   const [open, setOpen] = useState(false);
   const lenis = useLenis();
   const user = useUser();
+  const { signOut, busy: signingOut } = useSignOut();
 
   useGSAP(
     () => {
@@ -87,17 +89,7 @@ export function SiteNav() {
             ))}
           </ul>
           <div className="site-nav-actions">
-            {user ? (
-              <Link href="/account" className="site-nav-user" title="Your account">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={user.avatar} alt="" />
-                <span>{user.firstName}</span>
-              </Link>
-            ) : (
-              <Link href="/login" className="site-nav-signin">
-                Sign in
-              </Link>
-            )}
+            <AccountMenu tone={theme === "dark" ? "dark" : "light"} showName />
             <Link href="/plan" className="btn btn-sm site-nav-cta">
               Plan a trip
               <span className="btn-arrow">
@@ -127,9 +119,22 @@ export function SiteNav() {
             </li>
           ))}
         </ul>
-        <Link href={user ? "/account" : "/login"} className="mobile-menu-account" tabIndex={open ? 0 : -1}>
-          {user ? `Signed in as ${user.firstName} · Account` : "Sign in"}
-        </Link>
+        <div className="mobile-menu-account">
+          {user ? (
+            <>
+              <Link href="/account" tabIndex={open ? 0 : -1}>
+                Signed in as {user.firstName} · Account
+              </Link>
+              <button type="button" className="mobile-menu-signout" tabIndex={open ? 0 : -1} onClick={() => void signOut()} disabled={signingOut}>
+                Sign out
+              </button>
+            </>
+          ) : (
+            <Link href="/login" tabIndex={open ? 0 : -1}>
+              Sign in
+            </Link>
+          )}
+        </div>
         <Link href="/plan" className="btn btn-ember" tabIndex={open ? 0 : -1}>
           Plan a trip
           <span className="btn-arrow">
