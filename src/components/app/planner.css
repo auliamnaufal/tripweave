@@ -1569,3 +1569,23 @@
     background: rgba(255, 255, 255, 0.9);
   }
 }
+
+/* Live fares (real agent output) */
+.pl-flights-live {
+  grid-template-columns: repeat(2, 1fr);
+}
+.pl-flight-live {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--forest-700);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(42, 67, 52, 0.1);
+}
+@media (max-width: 560px) {
+  .pl-flights-live {
+    grid-template-columns: 1fr;
+  }
+}

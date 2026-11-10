@@ -193,7 +193,7 @@ export const destinations: Destination[] = [
     currency: "ARS",
     timezone: "ART (UTC−3)",
     defaultNights: 8,
-    keywords: ["patagonia", "chalten", "chaltén", "argentina", "fitz roy", "torres", "chile"],
+    keywords: ["patagonia", "chalten", "chaltén", "calafate", "argentina", "fitz roy", "torres", "chile"],
     flights: [
       { id: "pat-f1", airline: "LATAM + Aerolíneas", code: "LA 8051", depart: "22:10", arrive: "16:40+1", duration: "20h 30m", stops: "2 stops · Lima, Buenos Aires", returnDepart: "11:30", returnArrive: "06:55+1", pricePerPerson: 1240, tag: "Best" },
       { id: "pat-f2", airline: "Copa + Aerolíneas", code: "CM 285", depart: "06:40", arrive: "13:15+1", duration: "26h 35m", stops: "2 stops · Panama, Buenos Aires", returnDepart: "14:00", returnArrive: "12:40+1", pricePerPerson: 980, tag: "Cheapest" },
@@ -231,7 +231,7 @@ export const destinations: Destination[] = [
     currency: "IDR",
     timezone: "WITA (UTC+8)",
     defaultNights: 6,
-    keywords: ["bali", "ubud", "indonesia", "canggu", "seminyak"],
+    keywords: ["bali", "ubud", "denpasar", "canggu", "seminyak"],
     flights: [
       { id: "bali-f1", airline: "Singapore Airlines", code: "SQ 31", depart: "23:55", arrive: "11:10+2", duration: "20h 15m", stops: "1 stop · Singapore", returnDepart: "16:25", returnArrive: "22:30", pricePerPerson: 1090, tag: "Best" },
       { id: "bali-f2", airline: "Korean Air", code: "KE 24", depart: "11:40", arrive: "00:35+2", duration: "21h 55m", stops: "1 stop · Seoul", returnDepart: "01:10", returnArrive: "18:40", pricePerPerson: 860, tag: "Cheapest" },

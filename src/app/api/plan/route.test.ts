@@ -13,7 +13,7 @@ vi.mock("@/features/suppliers/duffel", async () => {
 
 const validBrief = {
   origin: { city: "San Francisco", country: "United States" },
-  destination: { city: "Honolulu", country: "United States" },
+  destination: { city: "Springfield", country: "United States" },
   timeZone: "UTC",
   travelers: 2,
   travelWindow: {

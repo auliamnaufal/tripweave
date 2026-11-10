@@ -426,7 +426,9 @@
 }
 .trip-stay-rating svg {
   color: #c99a2e;
-  fill: #c99a2e;
+}
+.trip-stay-rating svg .i-f {
+  fill-opacity: 1;
 }
 .trip-stay ul {
   display: grid;
@@ -1150,4 +1152,140 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Live booking states */
+.bk-list li.is-failed,
+.bk-list li.is-refunded {
+  border-color: color-mix(in srgb, var(--ember) 40%, transparent);
+  background: var(--ember-wash);
+}
+.is-failed .bk-state,
+.is-refunded .bk-state {
+  color: var(--ember-deep);
+}
+.bk-check.is-error circle {
+  fill: var(--ember);
+}
+.bk-live-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #dfe9df;
+  color: #2f7a52;
+  font-size: 12px;
+  font-weight: 500;
+}
+.bk-live-tag span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2f7a52;
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.bk-order {
+  font-family: var(--font-mono-stack);
+  font-size: 12px;
+  word-break: break-all;
+}
+.trip-note {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.trip-note svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ember);
+}
+
+/* Live PayPal approval modal */
+.co-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(13, 22, 17, 0.55);
+  backdrop-filter: blur(6px);
+  animation: co-fade 0.4s ease both;
+}
+@keyframes co-fade {
+  from {
+    opacity: 0;
+  }
+}
+.co-modal-card {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(440px, 100%);
+  padding: 32px 28px 24px;
+  border-radius: 24px;
+  background: var(--surface);
+  text-align: center;
+  box-shadow: var(--shadow-2);
+  animation: co-rise 0.6s var(--ease-out) both;
+}
+@keyframes co-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+}
+.co-modal-card h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.co-modal-card p {
+  color: var(--ink-soft);
+  font-size: 14.5px;
+}
+.co-modal-card .co-knot {
+  width: 42px;
+  height: 42px;
+}
+.co-modal-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #dfe9df;
+  color: #2f7a52;
+}
+.co-modal-icon.is-error {
+  background: var(--ember-wash);
+  color: var(--ember-deep);
+}
+.co-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.co-modal-cancel {
+  border: 0;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }

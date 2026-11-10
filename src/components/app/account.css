@@ -530,8 +530,9 @@
 .is-on .ac-heart {
   color: var(--ember);
 }
-.is-on .ac-heart svg {
+.is-on .ac-heart svg .i-f {
   fill: var(--ember);
+  fill-opacity: 1;
 }
 .ac-form {
   display: grid;

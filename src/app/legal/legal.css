@@ -1,0 +1,69 @@
+.lg-page {
+  min-height: 100vh;
+  background: var(--paper);
+}
+.lg-wrap {
+  max-width: 760px;
+  padding-bottom: 80px;
+}
+.lg-head {
+  padding: 40px 0 8px;
+}
+.lg-head .mono {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.lg-head h1 {
+  margin: 8px 0 14px;
+  font-size: clamp(44px, 7vw, 72px);
+  line-height: 0.95;
+}
+.lg-head p:last-child {
+  max-width: 58ch;
+  color: var(--ink-soft);
+  font-size: 17px;
+}
+.lg-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 26px 0 8px;
+}
+.lg-toc a {
+  padding: 7px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 13px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.lg-toc a:hover {
+  background: var(--forest-800);
+  color: var(--on-dark);
+}
+.lg-section {
+  padding: 28px 0 6px;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 90px;
+}
+.lg-section h2 {
+  margin-bottom: 12px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.lg-section p {
+  margin-bottom: 14px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.lg-foot {
+  margin-top: 28px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.lg-foot a {
+  color: var(--ember-deep);
+  font-weight: 500;
+}

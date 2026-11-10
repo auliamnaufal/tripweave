@@ -1,6 +1,27 @@
 import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
+import { findDestination, type Destination } from "@/features/ui-mock/destinations";
+
+// ponytail: the destination catalog still lives with the UI placeholder data.
+// Hotels and activities for the 7 catalog destinations come from there so the
+// agent picks a Lisbon stay for Lisbon instead of a generic fixture. Unknown
+// destinations fall back to the generic templates below. Move the catalog to
+// its own module once real hotel/activity APIs (#11, #12) replace it.
+function catalogFor(brief: TripBrief): Destination | undefined {
+  return findDestination(`${brief.destination.city} ${brief.destination.country}`);
+}
+
+function parseHours(duration: string): number {
+  if (duration.toLowerCase().includes("full")) return 8;
+  const n = Number.parseFloat(duration);
+  return Number.isFinite(n) && n > 0 ? n : 2;
+}
+
+function parseSlot(slot: string): number {
+  const [h, m] = slot.split(":").map(Number);
+  return (h || 0) + (m || 0) / 60;
+}
 
 const hourMs = 3_600_000;
 
@@ -87,12 +108,34 @@ export function searchHotels(brief: TripBrief, now: () => Date = () => new Date(
   const { retrievedAt, expiresAt } = stamp(now);
   const start = Date.parse(brief.travelWindow.startsAt);
   const end = Date.parse(brief.travelWindow.endsAt);
+  const catalog = catalogFor(brief);
+  if (catalog) {
+    const checkIn = start + 15 * hourMs;
+    const checkOut = end - 10 * hourMs;
+    const nights = Math.max(1, Math.round((checkOut - checkIn) / (24 * hourMs)));
+    const rooms = brief.travelers > 2 ? Math.ceil(brief.travelers / 2) : 1;
+    return catalog.hotels
+      .map((hotel) =>
+        makeOffer(
+          `hotel-${hotel.id}`,
+          "hotel",
+          hotel.name,
+          `${hotel.area}, ${catalog.name}. Rated ${hotel.rating} (${hotel.reviews} reviews). ${hotel.nightly}/night x ${nights} nights${rooms > 1 ? ` x ${rooms} rooms` : ""}. ${hotel.perks.join("; ")}.`,
+          checkIn,
+          checkOut,
+          hotel.nightly * nights * rooms * 100,
+          retrievedAt,
+          expiresAt,
+        ),
+      )
+      .filter((offer) => withinWindow(brief, Date.parse(offer.startsAt), Date.parse(offer.endsAt)));
+  }
   const candidates = [
     makeOffer(
       "hotel-main",
       "hotel",
-      "Waikiki guesthouse",
-      "A simple sample stay near the beach.",
+      `${brief.destination.city} guesthouse`,
+      "A simple sample stay in a central neighbourhood.",
       start + 15 * hourMs,
       end - 10 * hourMs,
       95000,
@@ -170,6 +213,31 @@ export function searchActivities(brief: TripBrief, now: () => Date = () => new D
   const start = Date.parse(brief.travelWindow.startsAt);
   const end = Date.parse(brief.travelWindow.endsAt);
   const numDays = Math.round((end - start) / (24 * hourMs));
+  const catalog = catalogFor(brief);
+  if (catalog) {
+    // Each catalog activity is offered on every middle day, so the agent can
+    // place it around the real flight times without schedule conflicts.
+    const offers: TravelOffer[] = [];
+    for (let day = 1; day < numDays; day++) {
+      for (const activity of catalog.activities) {
+        const begin = start + day * 24 * hourMs + parseSlot(activity.slot) * hourMs;
+        offers.push(
+          makeOffer(
+            `activity-${day}-${activity.id}`,
+            "activity",
+            activity.title,
+            `${activity.category} in ${catalog.name}, ${activity.duration}. Rated ${activity.rating}. ${activity.pricePerPerson ? `${activity.pricePerPerson} per person` : "Free"}.`,
+            begin,
+            begin + parseHours(activity.duration) * hourMs,
+            activity.pricePerPerson * brief.travelers * 100,
+            retrievedAt,
+            expiresAt,
+          ),
+        );
+      }
+    }
+    return offers.filter((offer) => withinWindow(brief, Date.parse(offer.startsAt), Date.parse(offer.endsAt)));
+  }
   const candidates = Array.from({ length: numDays }, (_, day) => {
     const template = activityTemplates[day % activityTemplates.length];
     const dayStart = start + day * 24 * hourMs;

@@ -1,0 +1,61 @@
+.bi-page {
+  min-height: 100vh;
+  padding-bottom: 80px;
+  background: var(--paper);
+}
+.bi-head {
+  max-width: 640px;
+  padding: 40px 0 28px;
+}
+.bi-head .mono {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.bi-head h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(40px, 6vw, 64px);
+  line-height: 0.95;
+}
+.bi-head p:last-child {
+  color: var(--ink-soft);
+}
+.bi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 24px;
+  padding: 14px;
+  border-radius: 22px;
+}
+.bi-light {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--forest-800);
+}
+.bi-dark {
+  background: var(--forest-900);
+  color: var(--on-dark);
+}
+.bi-grid figure {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 18px 8px 12px;
+  border-radius: 14px;
+}
+.bi-light figure {
+  background: var(--paper);
+}
+.bi-dark figure {
+  background: rgba(241, 237, 228, 0.05);
+}
+.bi-sizes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.bi-grid figcaption {
+  opacity: 0.6;
+  font-size: 11px;
+}

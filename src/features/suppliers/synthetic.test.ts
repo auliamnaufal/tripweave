@@ -5,7 +5,7 @@ import { minorUnits, zonedDateTime } from "@/features/planner/types";
 
 const brief: TripBrief = {
   origin: { city: "San Francisco", country: "United States" },
-  destination: { city: "Honolulu", country: "United States" },
+  destination: { city: "Springfield", country: "United States" },
   timeZone: "UTC",
   travelers: 2,
   travelWindow: {
@@ -43,6 +43,22 @@ describe("synthetic suppliers", () => {
       "activity-4-sunset",
       "activity-5-cooking",
     ]);
+  });
+
+  it("uses the destination catalog when the city is known", () => {
+    const lisbon: TripBrief = { ...brief, destination: { city: "Lisbon", country: "Portugal" } };
+    const hotels = searchHotels(lisbon, now);
+    const activities = searchActivities(lisbon, now);
+
+    expect(hotels.map((offer) => offer.title)).toEqual(["Casa Azulejo Alfama", "Lisboa Hostel Rooms", "Memmo Príncipe Real"]);
+    // 5 nights at $138 for one room
+    expect(hotels[0].costMinorUnits).toBe(138 * 5 * 100);
+    expect(activities.length).toBeGreaterThan(0);
+    expect(activities.every((offer) => offer.summary.includes("Lisbon"))).toBe(true);
+    for (const offer of [...hotels, ...activities]) {
+      expect(Date.parse(offer.startsAt)).toBeGreaterThanOrEqual(Date.parse(lisbon.travelWindow.startsAt));
+      expect(Date.parse(offer.endsAt)).toBeLessThanOrEqual(Date.parse(lisbon.travelWindow.endsAt));
+    }
   });
 
   it("returns a catalog with unique offer ids", () => {

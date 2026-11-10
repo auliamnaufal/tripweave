@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { defaultPrefs, type TripPrefs } from "./destinations";
+import { defaultDocSettings, type DocSettings, type TravelDoc } from "./documents";
 
 // Tiny localStorage-backed stores so the planner, trip, checkout, booked and account
 // screens share one demo state. Replace with real APIs when the agent is wired up.
@@ -106,3 +107,8 @@ export const useOrders = ordersStore.useValue;
 
 export const savedStore = createStore<string[]>("tw-saved", ["kyoto", "lisbon", "iceland"]);
 export const useSaved = savedStore.useValue;
+
+export const docsStore = createStore<TravelDoc[]>("tw-docs", []);
+export const useDocs = docsStore.useValue;
+export const docSettingsStore = createStore<DocSettings>("tw-doc-settings", defaultDocSettings);
+export const useDocSettings = docSettingsStore.useValue;

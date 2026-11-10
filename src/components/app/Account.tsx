@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppTopbar } from "@/components/app/AppTopbar";
+import { DocumentsPanel } from "@/components/app/TravelDocs";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
 import { buildPlan, destinations, getDestination } from "@/features/ui-mock/destinations";
@@ -21,10 +22,11 @@ import {
 } from "@/features/ui-mock/tripStore";
 import { gsap, useGSAP } from "@/lib/gsap";
 
-type Tab = "trips" | "saved" | "preferences" | "payments" | "settings";
+type Tab = "trips" | "saved" | "documents" | "preferences" | "payments" | "settings";
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
   { id: "trips", label: "Trips", icon: "ticket" },
   { id: "saved", label: "Saved", icon: "heart" },
+  { id: "documents", label: "Documents", icon: "passport" },
   { id: "preferences", label: "Preferences", icon: "sliders" },
   { id: "payments", label: "Payments", icon: "wallet" },
   { id: "settings", label: "Settings", icon: "user" },
@@ -231,6 +233,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
               </div>
             </>
           )}
+
+          {tab === "documents" && <DocumentsPanel prefs={prefs} />}
 
           {tab === "preferences" && (
             <form

@@ -18,15 +18,37 @@ import {
   type TripPrefs,
 } from "@/features/ui-mock/destinations";
 import { acknowledgements, applyAnswer, planSummary, questions, suggestionsFor, type QuestionId } from "@/features/ui-mock/agentScript";
-import { historyStore, tripStore, useHistory, useUser } from "@/features/ui-mock/tripStore";
+import { docsStore, historyStore, tripStore, useDocs, useHistory, useUser } from "@/features/ui-mock/tripStore";
+import {
+  blockers,
+  docIntent,
+  docMeta,
+  docStatus,
+  findDoc,
+  fmtDate,
+  fmtSize,
+  guessKind,
+  readDocument,
+  readiness,
+  upsertDoc,
+  validateFile,
+  type DocIntent,
+  type DocKind,
+  type TravelDoc,
+} from "@/features/ui-mock/documents";
+import { DocChecklist, useDocPicker } from "@/components/app/TravelDocs";
 import { gsap, useGSAP } from "@/lib/gsap";
+import { briefFromPrefs, streamPlan, type TripBriefWire } from "@/features/live/client";
+import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
+import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
 
 type StepStatus = "pending" | "running" | "done";
 type Step = { id: string; tool: string; label: string; status: StepStatus; result?: string; preview?: "flights" | "hotels" | "activities" };
 
 type Block =
-  | { id: string; role: "user"; text: string }
+  | { id: string; role: "user"; text: string; file?: { name: string; size: number } }
   | { id: string; role: "agent"; kind: "typing" }
+  | { id: string; role: "agent"; kind: "docs" }
   | { id: string; role: "agent"; kind: "text"; text: string; streaming: boolean }
   | { id: string; role: "agent"; kind: "question"; qid: QuestionId; text: string; options: string[]; multi: boolean; done: boolean; picked: string[] }
   | { id: string; role: "agent"; kind: "brief" }
@@ -37,6 +59,7 @@ const nav: { icon: IconName; label: string; href: string; active?: boolean }[] =
   { icon: "chat", label: "Planner", href: "/plan", active: true },
   { icon: "ticket", label: "My trips", href: "/account?tab=trips" },
   { icon: "heart", label: "Saved places", href: "/account?tab=saved" },
+  { icon: "passport", label: "Travel documents", href: "/account?tab=documents" },
   { icon: "globe", label: "Explore", href: "/#journeys" },
   { icon: "user", label: "Account", href: "/account" },
 ];
@@ -48,7 +71,34 @@ const toolIcon: Record<string, IconName> = {
   check_budget: "wallet",
   build_itinerary: "calendar",
   search_food: "leaf",
+  read_document: "file",
+  check_validity: "calendar",
+  save_document: "lock",
 };
+
+const liveToolTitle: Record<string, string> = {
+  search_flights: "Searching real flight fares",
+  search_hotels: "Comparing stays",
+  search_activities: "Finding things to do",
+  build_itinerary: "Checking totals and the schedule",
+};
+const liveStage: Record<string, number> = { search_flights: 1, search_hotels: 2, search_activities: 3, build_itinerary: 4 };
+
+function liveSummary(v: LiveView): string {
+  const under = v.budget - v.total;
+  const line = under >= 0 ? `${usd.format(under)} under your line` : `${usd.format(-under)} over your line`;
+  return `${v.note} All in: ${usd.format(v.total)} for ${v.travelers}, ${line}. Flights are live test-mode fares from Duffel; the stay and activities come from our sample catalog.`;
+}
+
+function liveSuggestions(last: string, place: string): string[] {
+  const s: string[] = [];
+  if (["hotel-cheaper", "flight-cheaper", "flight-faster", "rest", "other", "hotel-pick"].includes(last)) s.push("Undo that");
+  if (last !== "hotel-cheaper") s.push("Make the hotel cheaper");
+  if (!last.startsWith("flight")) s.push("Find a cheaper flight");
+  if (last !== "food") s.push(`Where should we eat in ${place}?`);
+  if (last !== "rest") s.push("Add a rest day");
+  return s.slice(0, 4);
+}
 
 let uid = 0;
 const session = Math.random().toString(36).slice(2, 7);
@@ -75,6 +125,9 @@ export function Planner() {
   const [panelTab, setPanelTab] = useState<"overview" | "todo" | "map">("overview");
   const [panelOpen, setPanelOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const docs = useDocs();
+  const docUndo = useRef<TravelDoc | null>(null);
 
   const root = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -82,8 +135,12 @@ export function Planner() {
   const alive = useRef(true);
   const started = useRef(false);
 
+  const live = useLivePlan();
+  const prevLive = useRef<LivePlan | null>(null);
+  const lastLiveError = useRef("");
   const dest = prefs ? getDestination(prefs.destId) : null;
-  const plan = useMemo(() => (prefs ? buildPlan(prefs) : null), [prefs]);
+  const lv = useMemo(() => (live && prefs && live.prefs.destId === prefs.destId ? liveView(live) : null), [live, prefs]);
+  const plan = useMemo(() => (prefs ? overlayLive(buildPlan(prefs), lv) : null), [prefs, lv]);
 
   useEffect(() => {
     alive.current = true;
@@ -154,6 +211,61 @@ export function Planner() {
     patch(id, (b) => (b.role === "agent" && b.kind === "work" ? { ...b, done: true } : b));
   }
 
+  /** Streams the real planner agent into a work card. Returns null if it fails. */
+  async function runLiveAgent(title: string, p: TripPrefs, brief: TripBriefWire): Promise<LivePlan | null> {
+    const id = nid();
+    let n = 0;
+    const step = (tool: string, label: string): Step => ({ id: `${id}-${n++}`, tool, label, status: "running" });
+    push({ id, role: "agent", kind: "work", title, done: false, steps: [step("plan_trip", "Sending your brief to the agent")] });
+    const update = (fn: (steps: Step[]) => Step[]) =>
+      patch(id, (b) => (b.role === "agent" && b.kind === "work" ? { ...b, steps: fn(b.steps) } : b));
+    const out: { plan: LivePlan | null; failure: string } = { plan: null, failure: "" };
+    try {
+      await streamPlan(brief, (event) => {
+        if (!alive.current) return;
+        if (event.kind === "tool-call") {
+          update((steps) => [
+            ...steps.map((s) => (s.tool === "plan_trip" && s.status === "running" ? { ...s, status: "done" as const, result: "The agent is on it" } : s)),
+            step(event.tool, liveToolTitle[event.tool] ?? event.label),
+          ]);
+        } else if (event.kind === "tool-result") {
+          update((steps) => {
+            const i = steps.findLastIndex((s) => s.tool === event.tool && s.status === "running");
+            if (i === -1) return steps;
+            const next = [...steps];
+            next[i] = { ...next[i], status: "done", result: event.summary };
+            return next;
+          });
+          setStage((s) => Math.max(s, liveStage[event.tool] ?? s));
+        } else if (event.kind === "plan") {
+          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt };
+        } else if (event.kind === "error") {
+          out.failure = event.message;
+        }
+      });
+    } catch (e) {
+      out.failure = e instanceof Error ? e.message : "The planner is unavailable.";
+    }
+    update((steps) => steps.map((s) => (s.status === "running" ? { ...s, status: "done", result: out.plan ? s.result ?? "Done" : "Stopped" } : s)));
+    patch(id, (b) => (b.role === "agent" && b.kind === "work" ? { ...b, done: true, title: out.plan ? b.title : "Live planner unavailable" } : b));
+    if (out.plan) {
+      setStage(5);
+      livePlanStore.set(out.plan);
+    } else {
+      lastLiveError.current = out.failure || "no plan returned";
+    }
+    return out.plan;
+  }
+
+  /** Points prefs.hotelIdx at the stay the agent chose, so the stay cards highlight it. */
+  function syncHotel(p: TripPrefs, result: LivePlan): TripPrefs {
+    const d = getDestination(p.destId);
+    const idx = d.hotels.findIndex((h) => result.plan.offers.some((o) => o.id === `hotel-${h.id}`));
+    const next = idx >= 0 ? { ...p, hotelIdx: idx } : p;
+    updatePrefs(next);
+    return next;
+  }
+
   async function askQuestion(i: number, d: Destination, p: TripPrefs) {
     const q = questions[i];
     const tid = nid();
@@ -216,7 +328,32 @@ export function Planner() {
     const d = getDestination(p.destId);
     await say("Here’s what I heard. I’ll start searching now.", 400);
     push({ id: nid(), role: "agent", kind: "brief" });
-    await sleep(500);
+    await sleep(300);
+    livePlanStore.set(null);
+    livePaymentStore.set(null);
+    prevLive.current = null;
+    const liveResult = await runLiveAgent(`Planning ${d.name}`, p, briefFromPrefs(p));
+    if (!alive.current) return;
+    if (liveResult) {
+      p = syncHotel(p, liveResult);
+      setPlanned(true);
+      tripStore.set(p);
+      const hl = historyStore.get();
+      const stl = stamp();
+      historyStore.set([{ id: `${p.destId}-${stl.id}`, title: `${d.name}, ${p.nights} nights`, destId: d.id, at: stl.at }, ...hl.filter((x) => x.destId !== d.id)].slice(0, 6));
+      await say(liveSummary(liveView(liveResult)), 300);
+      push({ id: nid(), role: "agent", kind: "flights" });
+      await sleep(250);
+      push({ id: nid(), role: "agent", kind: "hotels" });
+      await sleep(250);
+      push({ id: nid(), role: "agent", kind: "plan" });
+      await askForDocs(p);
+      if (!alive.current) return;
+      setSuggestions(withDocSuggestions(p, liveSuggestions("plan", d.name)));
+      setBusy(false);
+      return;
+    }
+    await say(`I couldn’t reach the live planner (${lastLiveError.current}), so here’s a sample plan from demo data instead.`, 300);
     const fit = fitToBudget(p);
     p = fit.prefs;
     updatePrefs(p);
@@ -244,7 +381,131 @@ export function Planner() {
     push({ id: nid(), role: "agent", kind: "hotels" });
     await sleep(250);
     push({ id: nid(), role: "agent", kind: "plan" });
-    setSuggestions(suggestionsFor(pl, "plan"));
+    await askForDocs(p);
+    if (!alive.current) return;
+    setSuggestions(withDocSuggestions(p, suggestionsFor(pl, "plan")));
+    setBusy(false);
+  }
+
+  function withDocSuggestions(p: TripPrefs, base: string[]) {
+    return blockers(p, docsStore.get()).length ? [...base.slice(0, 3), "How are my documents kept private?"] : base;
+  }
+
+  async function askForDocs(p: TripPrefs) {
+    const current = docsStore.get();
+    const missing = blockers(p, current);
+    const onFile = readiness(p, current).filter((r) => r.doc && r.status === "ok");
+    await sleep(350);
+    if (!alive.current) return;
+    if (missing.length === 0) {
+      const names = onFile.map((r) => `${docMeta[r.req.kind].short.toLowerCase()} ending ${r.doc!.last4}`);
+      await say(
+        names.length
+          ? `Your ${joinList(names)} ${names.length > 1 ? "are" : "is"} already on file, so checkout is one tap. Here’s what this trip needs:`
+          : "Nothing extra is required for this trip. Here’s the checklist anyway:",
+        400,
+      );
+    } else {
+      const items = missing.map((r) => `${docMeta[r.req.kind].label.toLowerCase()}${r.status === "missing" ? "" : " (the one on file expires too soon)"}`);
+      await say(`One last thing before you pay: the airline and hotel need your ${joinList(items)}. Upload it here once and I’ll keep it in Travel documents, so next time you skip this step.`, 400);
+    }
+    push({ id: nid(), role: "agent", kind: "docs" });
+  }
+
+  async function uploadDoc(file: File, expected?: DocKind) {
+    if (busy) return;
+    setBusy(true);
+    setSuggestions([]);
+    docUndo.current = null;
+    push({ id: nid(), role: "user", text: "", file: { name: file.name, size: file.size } });
+    const problem = validateFile(file);
+    if (problem) {
+      await say(problem, 350);
+      setBusy(false);
+      return;
+    }
+    const p = planned ? prefsRef.current : null;
+    const current = docsStore.get();
+    const firstOpen = p ? (blockers(p, current)[0] ?? readiness(p, current).find((r) => r.status !== "ok"))?.req.kind : undefined;
+    const kind = expected ?? guessKind(file.name, firstOpen ?? "passport");
+    const doc = readDocument({ kind, fileName: file.name, fileSize: file.size, holder: user?.name ?? "Traveller", prefs: p, source: "chat" });
+    const status = docStatus(doc, p);
+    const label = docMeta[kind].label;
+    await runWork(`Reading your ${label.toLowerCase()}`, [
+      { tool: "read_document", label: `Reading ${file.name}`, ms: 1100, result: () => `${label} · ${doc.holder} · •••• ${doc.last4}` },
+      { tool: "check_validity", label: p ? "Checking it against your trip dates" : "Checking the expiry date", ms: 800, result: () => (status === "ok" ? `Valid until ${fmtDate(doc.expires)}` : `Expires ${fmtDate(doc.expires)}, too close to the trip`) },
+      { tool: "save_document", label: "Saving to Travel documents", ms: 600, result: () => "Details kept on this device · file not stored" },
+    ]);
+    if (!alive.current) return;
+    docsStore.set(upsertDoc(docsStore.get(), doc));
+    const next = p ? blockers(p, docsStore.get()) : [];
+    const head = `Got it. ${label} for ${doc.holder}, ending ${doc.last4}, valid until ${fmtDate(doc.expires)}.`;
+    const tail =
+      status !== "ok"
+        ? " Heads up: it expires within 6 months of your return, and some countries refuse entry on that. Worth renewing before you fly."
+        : next.length
+          ? ` Next I need your ${docMeta[next[0].req.kind].label.toLowerCase()}.`
+          : p
+            ? " That’s everything the bookings need. You’re ready to pay."
+            : " Saved for your next trip.";
+    await say(head + tail, 300);
+    setSuggestions(p ? withDocSuggestions(p, suggestionsFor(buildPlan(p), "docs")) : ["Show my documents"]);
+    setBusy(false);
+  }
+
+  const picker = useDocPicker((file, kind) => void uploadDoc(file, kind));
+
+  async function handleDocIntent(text: string, intent: DocIntent) {
+    setBusy(true);
+    setSuggestions([]);
+    push({ id: nid(), role: "user", text });
+    const current = docsStore.get();
+    const p = planned ? prefsRef.current : null;
+    const base = p ? suggestionsFor(buildPlan(p), "docs") : [];
+    let extra: string[] = [];
+    if (intent.type === "privacy") {
+      await say(
+        "Your documents stay private. In this demo only the details (name, last four digits, expiry) are kept, in this browser, and the file itself is discarded after reading. In the full product each document goes only to the airline or hotel that needs it, after you approve payment, and it’s never used to train AI. Say “remove my passport” any time, or manage everything in Account → Travel documents.",
+      );
+      extra = ["Show my documents"];
+    } else if (intent.type === "show") {
+      await say(
+        current.length
+          ? `You have ${current.length} on file: ${joinList(current.map((d) => `${docMeta[d.kind].short.toLowerCase()} ending ${d.last4}`))}.`
+          : "You haven’t saved any documents yet. Upload one below, or drop a file into the message box.",
+      );
+      push({ id: nid(), role: "agent", kind: "docs" });
+    } else if (intent.type === "add") {
+      await say(`Sure. Tap Upload next to your ${intent.kind ? docMeta[intent.kind].label.toLowerCase() : "document"}, or drop the file into the message box. I’ll read it and replace the old one.`);
+      push({ id: nid(), role: "agent", kind: "docs" });
+    } else if (!intent.kind) {
+      await say("Which one should I remove? Say “remove my passport”, for example. Here’s what’s on file:");
+      push({ id: nid(), role: "agent", kind: "docs" });
+    } else {
+      const doc = findDoc(current, intent.kind);
+      const label = docMeta[intent.kind].label.toLowerCase();
+      if (!doc) {
+        await say(`There’s no ${label} on file, so there’s nothing to remove.`);
+      } else {
+        docUndo.current = doc;
+        docsStore.set(current.filter((d) => d.id !== doc.id));
+        await say(`Removed your ${label} ending ${doc.last4} from this device.`);
+        extra = ["Undo that"];
+      }
+    }
+    setSuggestions([...extra, ...base].slice(0, 4));
+    setBusy(false);
+  }
+
+  async function restoreDoc(text: string) {
+    const doc = docUndo.current;
+    docUndo.current = null;
+    if (!doc) return;
+    setBusy(true);
+    setSuggestions([]);
+    push({ id: nid(), role: "user", text });
+    docsStore.set(upsertDoc(docsStore.get(), doc));
+    await say(`Restored your ${docMeta[doc.kind].label.toLowerCase()} ending ${doc.last4}.`);
     setBusy(false);
   }
 
@@ -264,6 +525,12 @@ export function Planner() {
     setBusy(true);
     setSuggestions([]);
     push({ id: nid(), role: "user", text });
+
+    const current = livePlanStore.get();
+    if (current && current.prefs.destId === p.destId && (await refineLive(text, t, current, d))) {
+      setBusy(false);
+      return;
+    }
 
     if (t.includes("undo") && prevPrefs) {
       updatePrefs(prevPrefs);
@@ -339,10 +606,70 @@ export function Planner() {
     setBusy(false);
   }
 
+  /** Re-runs the real agent with one more constraint. Returns false for intents it leaves to the catalog. */
+  async function refineLive(text: string, t: string, current: LivePlan, d: Destination): Promise<boolean> {
+    if (/\bundo\b/.test(t)) {
+      const prev = prevLive.current;
+      if (!prev) return false;
+      livePlanStore.set(prev);
+      prevLive.current = null;
+      syncHotel(prev.prefs, prev);
+      await say(`Done, back to the previous plan. Total is ${usd.format(liveView(prev).total)} again.`);
+      setSuggestions(liveSuggestions("undo", d.name));
+      return true;
+    }
+    let constraint = text;
+    let last = "other";
+    let title = "Re-planning with your note";
+    let show: "hotels" | "flights" | "days" | "plan" = "plan";
+    if (t.includes("hotel") && t.includes("cheap")) {
+      constraint = "Choose the cheapest hotel offer available.";
+      [last, title, show] = ["hotel-cheaper", "Re-checking stays", "hotels"];
+    } else if (t.includes("flight") && t.includes("cheap")) {
+      constraint = "Choose the cheapest outbound and return flights.";
+      [last, title, show] = ["flight-cheaper", "Re-checking flights", "flights"];
+    } else if (t.includes("flight") && t.includes("fast")) {
+      constraint = "Choose the shortest flights, even if they cost more.";
+      [last, title, show] = ["flight-faster", "Re-checking flights", "flights"];
+    } else if (t.includes("rest")) {
+      constraint = "Leave at least one full day in the middle of the trip with no activities.";
+      [last, title, show] = ["rest", "Adjusting the days", "days"];
+    } else if (t.startsWith("use the hotel")) {
+      [last, title, show] = ["hotel-pick", "Switching the stay", "hotels"];
+    } else if (/(eat|food|restaurant|stays|itinerary|day by day|document|passport)/.test(t)) {
+      return false;
+    } else {
+      const other = findDestination(t);
+      if (other && other.id !== d.id) return false;
+    }
+    const before = liveView(current);
+    const brief: TripBriefWire = { ...current.brief, constraints: [...current.brief.constraints, constraint].slice(-20) };
+    const result = await runLiveAgent(title, current.prefs, brief);
+    if (!alive.current) return true;
+    if (!result) {
+      await say(`The live planner didn’t answer (${lastLiveError.current}). Your current plan is unchanged.`);
+      setSuggestions(liveSuggestions("none", d.name));
+      return true;
+    }
+    prevLive.current = current;
+    syncHotel(current.prefs, result);
+    const after = liveView(result);
+    const diff = after.total - before.total;
+    const change = diff === 0 ? "no change in price" : diff < 0 ? `${usd.format(-diff)} less` : `${usd.format(diff)} more`;
+    await say(`${result.note} New total ${usd.format(after.total)} (${change}).`);
+    push({ id: nid(), role: "agent", kind: show });
+    setSuggestions(liveSuggestions(last, d.name));
+    return true;
+  }
+
   async function pickOption(kind: "flight" | "hotel", idx: number) {
     const p = prefsRef.current;
     if (!p || busy) return;
     const d = getDestination(p.destId);
+    if (kind === "hotel" && livePlanStore.get()?.prefs.destId === p.destId) {
+      if (p.hotelIdx === idx) return;
+      return void refine(`Use the hotel “${d.hotels[idx].name}” for the whole stay`);
+    }
     if ((kind === "flight" ? p.flightIdx : p.hotelIdx) === idx) return;
     const next = kind === "flight" ? { ...p, flightIdx: idx } : { ...p, hotelIdx: idx };
     setPrevPrefs(p);
@@ -355,15 +682,24 @@ export function Planner() {
     setBusy(false);
   }
 
-  function submit(text: string) {
+  function route(text: string) {
     const value = text.trim();
-    if (!value) return;
-    setInput("");
-    if (!prefsRef.current || blocks.length === 0) return void start(value);
+    if (!value || busy) return;
     const q = qIndex !== null ? questions[qIndex] : null;
+    if (/\bundo\b/i.test(value) && docUndo.current) return void restoreDoc(value);
+    docUndo.current = null;
+    const intent = q ? null : docIntent(value);
+    if (intent) return void handleDocIntent(value, intent);
+    if (!prefsRef.current || blocks.length === 0) return void start(value);
     if (q) return void answer(q.id, value);
     if (planned) return void refine(value);
     return void start(value);
+  }
+
+  function submit(text: string) {
+    if (!text.trim() || busy) return;
+    setInput("");
+    route(text);
   }
 
   function reset() {
@@ -512,7 +848,19 @@ export function Planner() {
                 if (b.role === "user") {
                   return (
                     <li key={b.id} className="pl-msg pl-msg-user">
-                      <p>{b.text}</p>
+                      {b.file ? (
+                        <span className="pl-attach">
+                          <span className="pl-attach-icon">
+                            <Icon name="file" size={17} />
+                          </span>
+                          <span>
+                            <b>{b.file.name}</b>
+                            <small>{fmtSize(b.file.size)} · private upload</small>
+                          </span>
+                        </span>
+                      ) : (
+                        <p>{b.text}</p>
+                      )}
                     </li>
                   );
                 }
@@ -525,11 +873,14 @@ export function Planner() {
                       <AgentBlock
                         block={b}
                         prefs={prefs}
+                        docPrefs={planned ? prefs : null}
+                        onPickDoc={(k) => picker.open(k)}
                         busy={busy}
                         onAnswer={answer}
                         onSkip={skipQuestions}
                         onPick={pickOption}
                         onStart={start}
+                        lv={lv}
                       />
                     </div>
                   </li>
@@ -540,7 +891,7 @@ export function Planner() {
                   <span className="pl-agent-mark" aria-hidden="true" />
                   <div className="pl-suggest" role="group" aria-label="Suggested follow-ups">
                     {suggestions.map((s) => (
-                      <button key={s} type="button" onClick={() => refine(s)}>
+                      <button key={s} type="button" onClick={() => route(s)}>
                         <Icon name="spark" size={13} />
                         {s}
                       </button>
@@ -560,7 +911,26 @@ export function Planner() {
               submit(input);
             }}
           >
-            <div className="pl-input">
+            {picker.input}
+            <div
+              className={`pl-input ${dragging ? "is-drag" : ""}`}
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes("Files")) return;
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                const f = e.dataTransfer.files?.[0];
+                setDragging(false);
+                if (!f) return;
+                e.preventDefault();
+                void uploadDoc(f);
+              }}
+            >
+              <button type="button" className="pl-attach-btn" onClick={() => picker.open()} disabled={busy} aria-label="Upload a travel document" title="Upload a travel document">
+                <Icon name="paperclip" size={18} />
+              </button>
               <label htmlFor="pl-q" className="sr-only">
                 Message the planner
               </label>
@@ -581,7 +951,10 @@ export function Planner() {
                 <Icon name="send" size={18} />
               </button>
             </div>
-            <p className="pl-fine">Demo data. Prices are checked by code, not the model, and nothing is charged until you approve.</p>
+            <p className="pl-fine">
+              Demo data. Prices are checked by code, not the model, and nothing is charged until you approve. The planner can make mistakes, so check entry rules
+              with official sources. <Link href="/legal">Terms &amp; privacy</Link>
+            </p>
           </form>
         )}
       </main>
@@ -667,12 +1040,28 @@ export function Planner() {
                   <li className={stage >= 3 ? "is-in" : ""}>
                     <Icon name="compass" size={16} />
                     <span>
-                      <b>{stage >= 3 ? `${plan.activities.length} activities` : "Things to do"}</b>
+                      <b>{stage >= 3 ? `${plan.activities.length} ${plan.activities.length === 1 ? "activity" : "activities"}` : "Things to do"}</b>
                       <small>{stage >= 3 ? plan.activities.map((a) => a.title.split(" ")[0]).join(" · ") : "Matching your vibe"}</small>
                     </span>
                     <em>{stage >= 3 ? usd.format(plan.totals.activities) : ""}</em>
                   </li>
                 </ul>
+                {planned &&
+                  (() => {
+                    const req = readiness(plan.prefs, docs).filter((r) => r.req.need === "required");
+                    const ok = req.filter((r) => r.status === "ok").length;
+                    const ready = ok === req.length;
+                    return (
+                      <Link href="/account?tab=documents" className={`pl-docs-mini ${ready ? "is-ready" : ""}`}>
+                        <Icon name={ready ? "shield" : "passport"} size={18} />
+                        <span>
+                          <b>Travel documents</b>
+                          <small>{ready ? "Ready for checkout" : `${ok} of ${req.length} required ready`}</small>
+                        </span>
+                        <Icon name="arrow" size={14} />
+                      </Link>
+                    );
+                  })()}
                 <div className="pl-advice">
                   <h3>Good to know</h3>
                   <p>
@@ -733,17 +1122,28 @@ export function Planner() {
   );
 }
 
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 function AgentBlock({
   block,
   prefs,
+  docPrefs,
+  onPickDoc,
   busy,
   onAnswer,
   onSkip,
   onPick,
   onStart,
+  lv,
 }: {
+  lv: LiveView | null;
   block: Exclude<Block, { role: "user" }>;
   prefs: TripPrefs | null;
+  docPrefs: TripPrefs | null;
+  onPickDoc: (k: DocKind) => void;
   busy: boolean;
   onAnswer: (q: QuestionId, v: string) => void;
   onSkip: () => void;
@@ -751,7 +1151,7 @@ function AgentBlock({
   onStart: (t: string) => void;
 }) {
   const [multi, setMulti] = useState<string[]>([]);
-  const plan = prefs ? buildPlan(prefs) : null;
+  const plan = prefs ? overlayLive(buildPlan(prefs), lv) : null;
 
   if (block.kind === "typing") {
     return (
@@ -826,6 +1226,9 @@ function AgentBlock({
   if (block.kind === "work") {
     return <WorkCard block={block} />;
   }
+  if (block.kind === "docs") {
+    return <DocChecklist prefs={docPrefs} busy={busy} onPick={onPickDoc} />;
+  }
   if (!plan) return null;
   const { dest } = plan;
 
@@ -844,6 +1247,33 @@ function AgentBlock({
             <Icon name={x.icon} size={14} /> {x.label}
           </span>
         ))}
+      </div>
+    );
+  }
+  if (block.kind === "flights" && lv) {
+    return (
+      <div className="pl-options-card">
+        <p className="pl-card-title">
+          <Icon name="plane" size={15} /> Live fares · {plan.originCode} ⇄ {dest.airport} · {plan.prefs.travelers} {plan.prefs.travelers > 1 ? "travellers" : "traveller"}
+        </p>
+        <div className="pl-flights pl-flights-live">
+          {lv.flights.map((f) => (
+            <div key={f.id} className="pl-flight-live is-selected">
+              <span className="pl-tag tag-best">{f.date}</span>
+              <span className="pl-fl-route">
+                <b>{f.depart}</b>
+                <i>
+                  <small>{f.duration}</small>
+                </i>
+                <b>{f.arrive}</b>
+              </span>
+              <span className="pl-fl-meta">
+                {f.from} → {f.to} · {f.airline} · {f.stops}
+              </span>
+              <span className="pl-fl-price">{usd.format(f.price)}</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -958,7 +1388,7 @@ function AgentBlock({
             {plan.prefs.nights} nights in {dest.name}
           </h3>
           <p className="pl-plan-meta">
-            {plan.prefs.when} · {plan.prefs.travelerLabel} · {plan.activities.length} activities
+            {plan.prefs.when} · {plan.prefs.travelerLabel} · {plan.activities.length} {plan.activities.length === 1 ? "activity" : "activities"}
           </p>
           <div className="pl-plan-total">
             <b>{usd.format(plan.totals.total)}</b>

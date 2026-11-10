@@ -5,8 +5,8 @@ import Link from "next/link";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
-import { planView, type PlanView } from "@/features/ui-mock/planView";
-import { useHydrated, useTripPrefs } from "@/features/ui-mock/tripStore";
+import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
+import { useHydrated } from "@/features/ui-mock/tripStore";
 import { gsap, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 
@@ -27,12 +27,12 @@ const sections = [
 
 export function TripView() {
   const hydrated = useHydrated();
-  const prefs = useTripPrefs();
+  const view = useTripView();
   if (!hydrated) return <div className="trip-page" aria-busy="true" />;
-  return <TripViewInner view={planView(prefs)} />;
+  return <TripViewInner view={view} />;
 }
 
-function TripViewInner({ view }: { view: PlanView }) {
+function TripViewInner({ view }: { view: AnyTripView }) {
   const root = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState("itinerary");
   const lenis = useLenis();
@@ -134,7 +134,7 @@ function TripViewInner({ view }: { view: PlanView }) {
         <img className="trip-hero-img" src={view.hero} alt="Lanikai Bay and the Mokulua islands from the pillbox trail" />
         <div className="trip-hero-shade" />
         <div className="trip-hero-copy app-wrap">
-          <span className="tag-sample trip-tag">Sample itinerary</span>
+          <span className="tag-sample trip-tag">{isLive(view) ? "Planned by the agent · live flight fares" : "Sample itinerary"}</span>
           <h1 className="trip-title display">{view.title}</h1>
           <ul className="trip-hero-meta">
             <li>
@@ -170,6 +170,11 @@ function TripViewInner({ view }: { view: PlanView }) {
         <div className="trip-main">
           <section id="itinerary" className="trip-section">
             <h2 className="trip-h2 display">Day by day</h2>
+            {isLive(view) && view.note && (
+              <p className="trip-note">
+                <Icon name="spark" size={16} /> {view.note}
+              </p>
+            )}
             <div className="trip-days">
               <span className="trip-thread" aria-hidden="true">
                 <i className="trip-thread-fill" />

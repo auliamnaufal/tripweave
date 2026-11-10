@@ -314,6 +314,31 @@ button.chip:hover {
   height: 14px;
 }
 
+/* Field Journal icons (see components/brand/Icon.tsx) */
+.icon {
+  flex: none;
+  overflow: visible;
+}
+.icon .i-f {
+  fill: var(--icon-fill, var(--sand));
+  fill-opacity: 0.32;
+}
+.icon .i-a {
+  fill: var(--icon-accent, var(--ember));
+}
+.icon .i-as {
+  stroke: var(--icon-accent, var(--ember));
+}
+.icon .i-h {
+  stroke-width: 1;
+  opacity: 0.45;
+}
+.btn-ember,
+.pl-send,
+.pay-btn {
+  --icon-accent: currentColor;
+}
+
 .tag-sample {
   display: inline-flex;
   align-items: center;
