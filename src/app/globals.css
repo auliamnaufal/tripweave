@@ -11,7 +11,7 @@
   --surface: #fbf9f4;
   --ink: #18201b;
   --ink-soft: #545c55;
-  --ink-faint: #8a8f87;
+  --ink-faint: #61645e; /* was #8a8f87 (3.1:1 on --surface); now passes 4.5:1 on surface, paper and paper-2 */
   --line: rgba(24, 32, 27, 0.12);
   --line-strong: rgba(24, 32, 27, 0.22);
   --ember: #c9512a;
@@ -138,6 +138,28 @@ p {
   font-style: italic;
 }
 
+/* App screens (planner, trip, checkout, booked, account, sign-in, legal) use Geist for display type,
+   matching the demo video (Ember Night). The landing page keeps Instrument Serif. */
+:is(.pl, .trip-page, .co-page, .bk-page, .ac-page, .lg, .lg-page) {
+  --font-display-stack: var(--font-sans), system-ui, sans-serif;
+}
+:is(.pl, .trip-page, .co-page, .bk-page, .ac-page, .lg, .lg-page) .display {
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+/* The accent word is carried by ember color, not italics */
+:is(.pl, .trip-page, .co-page, .bk-page, .ac-page, .lg, .lg-page) .display em {
+  font-style: normal;
+}
+/* Big totals: light weight, tight tracking, steady digits */
+.co-page .display.co-total,
+.trip-summary-total .display {
+  font-weight: 300;
+  letter-spacing: -0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
 .mono {
   font-family: var(--font-mono-stack);
   font-size: 11px;
@@ -257,8 +279,10 @@ p {
   font-size: 15px;
   transition: transform 0.4s var(--ease-out), filter 0.2s ease;
 }
-.pay-btn:hover {
-  filter: brightness(0.96);
+@media (hover: hover) {
+  .pay-btn:hover {
+    filter: brightness(0.96);
+  }
 }
 .pay-btn:active {
   transform: scale(0.98);
@@ -305,9 +329,11 @@ p {
   white-space: nowrap;
   transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
-button.chip:hover {
-  border-color: var(--line-strong);
-  color: var(--ink);
+@media (hover: hover) {
+  button.chip:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
 }
 .chip svg {
   width: 14px;

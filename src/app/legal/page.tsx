@@ -11,7 +11,7 @@ const sections = [
     id: "terms",
     title: "Terms of use",
     body: [
-      "Tripweave is a prototype built for demonstration. Flights, stays, activities, prices and availability are sample data and are not offers to sell.",
+      "Tripweave is a prototype built for demonstration. Flights, stays, activities, prices and availability are sample data and are not offers to sell. Final prices are confirmed by each supplier at booking.",
       "Plans are drafted by an AI agent. They can be wrong or out of date, so review every detail before you approve a payment. Budget totals are calculated by code, not by the model.",
       "When you pay, Tripweave is the merchant of record and books each supplier on your behalf. Each supplier’s own terms also apply, including airline fare rules and hotel cancellation policies. A booking that fails is refunded.",
     ],

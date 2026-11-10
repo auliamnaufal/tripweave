@@ -162,10 +162,12 @@
   font-weight: 500;
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.3s var(--ease-out);
 }
-.td-upload:not(:disabled):hover {
-  border-color: var(--forest-800);
-  background: var(--forest-800);
-  color: var(--on-dark);
+@media (hover: hover) {
+  .td-upload:not(:disabled):hover {
+    border-color: var(--forest-800);
+    background: var(--forest-800);
+    color: var(--on-dark);
+  }
 }
 .td-upload:not(:disabled):active {
   transform: scale(0.97);
@@ -246,9 +248,11 @@
   color: var(--ink-soft);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
-.pl-attach-btn:not(:disabled):hover {
-  background: var(--paper-2);
-  color: var(--ink);
+@media (hover: hover) {
+  .pl-attach-btn:not(:disabled):hover {
+    background: var(--paper-2);
+    color: var(--ink);
+  }
 }
 .pl-attach-btn:disabled {
   opacity: 0.35;
@@ -271,8 +275,10 @@
   font-size: 13px;
   transition: background-color 0.2s ease;
 }
-.pl-docs-mini:hover {
-  background: var(--paper-2);
+@media (hover: hover) {
+  .pl-docs-mini:hover {
+    background: var(--paper-2);
+  }
 }
 .pl-docs-mini > svg {
   color: var(--forest-700);
@@ -434,13 +440,17 @@
   font-size: 13px;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
-.td-act:hover {
-  background: var(--paper);
-  color: var(--ink);
+@media (hover: hover) {
+  .td-act:hover {
+    background: var(--paper);
+    color: var(--ink);
+  }
 }
-.td-act-danger:hover {
-  background: var(--ember-wash);
-  color: var(--ember-deep);
+@media (hover: hover) {
+  .td-act-danger:hover {
+    background: var(--ember-wash);
+    color: var(--ember-deep);
+  }
 }
 .td-edit {
   display: grid;

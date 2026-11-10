@@ -6,14 +6,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon } from "@/components/brand/Icon";
 import { DEMO_USER, historyStore, userStore } from "@/features/ui-mock/tripStore";
-import { gsap, useGSAP } from "@/lib/gsap";
+import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 import { createClient } from "@/lib/supabase/client";
+import { hydrateFromServer } from "@/features/db/sync";
 
 export function Login() {
   const root = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") ?? "/plan";
+  const asked = params.get("next");
+  // Only follow paths inside this site ("/plan", not "//evil.example").
+  const next = asked && asked.startsWith("/") && !asked.startsWith("//") ? asked : "/plan";
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -23,6 +26,7 @@ export function Login() {
 
   useGSAP(
     () => {
+      if (prefersReducedMotion()) return;
       gsap
         .timeline({ defaults: { ease: "expo.out" } })
         .from(".lg-photo img", { scale: 1.2, duration: 2.2 }, 0)
@@ -62,6 +66,11 @@ export function Login() {
       }
       const { error } = await createClient().auth.signInWithPassword({ email, password });
       if (error) throw new Error(mode === "signup" ? "Account created, but sign-in failed — try signing in." : "Wrong email or password.");
+      // Populate the local userStore before navigating — /plan gates on it being
+      // set, and that normally happens async off the auth-state listener, which
+      // would otherwise lose the race against this navigation and bounce right
+      // back to /login.
+      await hydrateFromServer();
       router.push(next);
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Something went wrong.");

@@ -81,9 +81,11 @@
   box-shadow: var(--shadow-2);
   transition: transform 0.4s var(--ease-out), background-color 0.3s ease;
 }
-.lg-demo:hover {
-  background: var(--forest-800);
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .lg-demo:hover {
+    background: var(--forest-800);
+    transform: translateY(-2px);
+  }
 }
 .lg-demo:active {
   transform: scale(0.98);
@@ -444,9 +446,11 @@
   border: 1px solid var(--line);
   transition: border-color 0.2s ease, transform 0.4s var(--ease-out);
 }
-.ac-mini:hover {
-  border-color: var(--line-strong);
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .ac-mini:hover {
+    border-color: var(--line-strong);
+    transform: translateY(-2px);
+  }
 }
 .ac-mini img {
   width: 56px;
@@ -539,7 +543,7 @@
   transition: transform 0.3s var(--ease-out), color 0.2s ease;
 }
 .ac-heart:active {
-  transform: scale(0.88);
+  transform: scale(0.96);
 }
 .is-on .ac-heart {
   color: var(--ember);
@@ -742,5 +746,53 @@
   .ac-table th:nth-child(4),
   .ac-table td:nth-child(4) {
     display: none;
+  }
+}
+
+/* Toggle chips carry a check icon when on, so state never rests on color alone */
+.ac-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ac-undo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.ac-undo button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .ac-head {
+    padding: 20px;
+  }
+  .ac-id {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .ac-id img {
+    width: 60px;
+    height: 60px;
+  }
+  .ac-stats {
+    width: 100%;
+  }
+  .ac-stats div {
+    flex: 1;
+    min-width: 0;
   }
 }
