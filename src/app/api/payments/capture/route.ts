@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BUNDLE_REFERENCE_ID, capturePlanOrder, refundCapture, type PurchaseUnitCapture } from "@/features/payments/paypal";
 import { toTravelOffer, travelOfferSchema, type TravelOffer } from "@/features/planner/travelOffer";
 import { reconcileBookings } from "@/features/suppliers/booking";
+import { authedUser } from "@/lib/supabase/authedUser";
 import {
   streamBookingAgent,
   type BookingAgentOutput,
@@ -14,6 +15,10 @@ const captureRequestSchema = z.object({
   orderId: z.string().min(1),
   offers: z.array(travelOfferSchema).min(1),
   forceFailureOfferId: z.string().optional(),
+  // Descriptive only — never used to compute what gets charged. That still
+  // comes solely from `offers` above, which is why this pair is optional.
+  destId: z.string().optional(),
+  title: z.string().optional(),
 });
 
 export type CaptureStreamEvent =
@@ -39,13 +44,17 @@ function ndjsonLine(event: CaptureStreamEvent): Uint8Array {
 }
 
 export async function POST(request: Request) {
-  let input: { orderId: string; offers: TravelOffer[]; forceFailureOfferId?: string };
+  let input: { orderId: string; offers: TravelOffer[]; forceFailureOfferId?: string; destId?: string; title?: string };
   try {
     const parsed = captureRequestSchema.parse(await request.json());
     input = { ...parsed, offers: parsed.offers.map(toTravelOffer) };
   } catch {
     return Response.json({ error: "Invalid payment request." }, { status: 400 });
   }
+
+  // Resolved once, outside the stream, since it needs the request's cookies —
+  // best-effort: a guest (no session) still pays and books exactly as before.
+  const { supabase, user } = await authedUser();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -60,6 +69,22 @@ export async function POST(request: Request) {
         if (captured.status !== "COMPLETED") {
           controller.enqueue(ndjsonLine({ kind: "error", message: "Payment was not completed." }));
           return;
+        }
+
+        if (user && input.destId && input.title) {
+          // Best-effort receipt row — a failure here must never break booking.
+          await supabase.from("orders").insert({
+            user_id: user.id,
+            label: input.orderId,
+            paypal_order_id: input.orderId,
+            title: input.title,
+            dest_id: input.destId,
+            total_minor_units: amountMinorUnits,
+            items: input.offers.length,
+            status: "completed",
+          }).then(({ error }) => {
+            if (error) console.error("order receipt insert failed", error);
+          });
         }
 
         // An Onboarded Supplier's offer was its own purchase unit, paid directly;

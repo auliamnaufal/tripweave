@@ -18,14 +18,14 @@ Flight offers are real, retrieved from Duffel at request time. Hotels and activi
 1. Install Node.js 22 or later and pnpm.
 2. Install dependencies with `pnpm install`.
 3. Copy `.env.example` to `.env.local`.
-4. Set `COMMAND_CODE_API_KEY` to your Command Code API key and `COMMAND_CODE_MODEL` to a model id that supports `/chat/completions`. Verify ids with `GET https://api.commandcode.ai/provider/v1/models`.
+4. Set `OPENAI_API_KEY` to your OpenAI API key. `OPENAI_MODEL` defaults to `gpt-6-luna`.
 5. Set `DUFFEL_API_KEY` from a free test-mode account at [duffel.com](https://duffel.com) ("Create account" on the dashboard; no sales call needed). Without it, flight search returns a 503.
 6. Optionally set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` for the sandbox checkout.
 7. Start the app with `pnpm dev` and open `http://localhost:3000`.
 
 ## Model provider
 
-The agent uses the Command Code Provider API at `https://api.commandcode.ai/provider/v1`, which is OpenAI- and Anthropic-compatible. `COMMAND_CODE_API_KEY` authenticates it with `Authorization: Bearer <key>`. Claude models serve on `/v1/messages`; OpenAI and open models serve on `/v1/chat/completions` and mostly `/v1/responses`. Pick a model whose id and endpoint match, and keep the key out of the browser bundle and logs.
+The planner and booking agents call the OpenAI API (`/v1/chat/completions`) through LangChain's `ChatOpenAI`, using `OPENAI_API_KEY` and `OPENAI_MODEL` (default `gpt-6-luna`). `gpt-6-luna` only accepts the default temperature, so the app doesn't set one. Keep the key out of the browser bundle and logs.
 
 ## Data and product limits
 

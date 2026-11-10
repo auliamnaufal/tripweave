@@ -52,8 +52,13 @@ export function buildItinerary(brief: TripBrief, offers: readonly TravelOffer[])
     offers.reduce((sum, offer) => sum + offer.costMinorUnits, 0),
   );
   const budgetMinorUnits = brief.hardBudget.amountMinorUnits;
-  const windowStart = Date.parse(brief.travelWindow.startsAt);
-  const windowEnd = Date.parse(brief.travelWindow.endsAt);
+  // The trip window is a range of calendar dates, and each offer's timestamp is
+  // local to where it happens (a flight lands in its arrival airport's zone).
+  // Comparing local dates keeps a return flight that lands late on the last day
+  // inside the trip, instead of pushing it out because it's already the next
+  // day in UTC.
+  const windowStartDate = dateOnly(brief.travelWindow.startsAt);
+  const windowEndDate = dateOnly(brief.travelWindow.endsAt);
   const violations: OfferViolation[] = [];
 
   if (totalCostMinorUnits > budgetMinorUnits) {
@@ -68,7 +73,7 @@ export function buildItinerary(brief: TripBrief, offers: readonly TravelOffer[])
       violations.push({ kind: "invalid-time-range", offerId: offer.id });
       continue;
     }
-    if (start < windowStart || end > windowEnd) {
+    if (dateOnly(offer.startsAt) < windowStartDate || dateOnly(offer.endsAt) > windowEndDate) {
       violations.push({ kind: "outside-trip-window", offerId: offer.id });
     }
     if (offer.productKind !== "hotel") {
