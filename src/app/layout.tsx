@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { SmoothScroll } from "@/components/motion/SmoothScroll";
+import { SupabaseSync } from "@/features/db/SupabaseSync";
 import "./globals.css";
 
 const display = Instrument_Serif({
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
+        <SupabaseSync />
         <SmoothScroll>{children}</SmoothScroll>
       </body>
     </html>

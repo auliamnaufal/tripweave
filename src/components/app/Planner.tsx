@@ -41,6 +41,7 @@ import { gsap, useGSAP } from "@/lib/gsap";
 import { briefFromPrefs, streamPlan, type TripBriefWire } from "@/features/live/client";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
 import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
+import { logChatMessage, syncTrip } from "@/features/db/sync";
 
 type StepStatus = "pending" | "running" | "done";
 type Step = { id: string; tool: string; label: string; status: StepStatus; result?: string; preview?: "flights" | "hotels" | "activities" };
@@ -134,6 +135,9 @@ export function Planner() {
   const prefsRef = useRef<TripPrefs | null>(null);
   const alive = useRef(true);
   const started = useRef(false);
+  // The DB row for the trip currently being planned, once syncTrip() has returned one — chat
+  // messages logged before that point are saved with no trip_id (still the user's, just unlinked).
+  const tripIdRef = useRef<string | null>(null);
 
   const live = useLivePlan();
   const prevLive = useRef<LivePlan | null>(null);
@@ -168,7 +172,10 @@ export function Planner() {
     { scope: root },
   );
 
-  const push = useCallback((b: Block) => setBlocks((prev) => [...prev, b]), []);
+  const push = useCallback((b: Block) => {
+    if (b.role === "user" && b.text) logChatMessage({ role: "user", text: b.text, tripId: tripIdRef.current });
+    setBlocks((prev) => [...prev, b]);
+  }, []);
   const patch = useCallback(
     (id: string, fn: (b: Block) => Block) => setBlocks((prev) => prev.map((b) => (b.id === id ? fn(b) : b))),
     [],
@@ -181,6 +188,7 @@ export function Planner() {
   }, []);
 
   async function say(text: string, typingMs = 650) {
+    logChatMessage({ role: "agent", kind: "text", text, tripId: tripIdRef.current });
     const tid = nid();
     push({ id: tid, role: "agent", kind: "typing" });
     await sleep(typingMs);
@@ -341,6 +349,16 @@ export function Planner() {
       const hl = historyStore.get();
       const stl = stamp();
       historyStore.set([{ id: `${p.destId}-${stl.id}`, title: `${d.name}, ${p.nights} nights`, destId: d.id, at: stl.at }, ...hl.filter((x) => x.destId !== d.id)].slice(0, 6));
+      syncTrip({
+        destId: p.destId,
+        title: `${d.name}, ${p.nights} nights`,
+        prefs: p,
+        plan: liveResult,
+        isLive: true,
+        source: liveResult.source,
+        totalMinorUnits: Math.round(liveView(liveResult).total * 100),
+        budgetMinorUnits: Math.round(p.budget * 100),
+      }).then((id) => (tripIdRef.current = id));
       await say(liveSummary(liveView(liveResult)), 300);
       push({ id: nid(), role: "agent", kind: "flights" });
       await sleep(250);
@@ -375,6 +393,15 @@ export function Planner() {
     const h = historyStore.get();
     const st = stamp();
     historyStore.set([{ id: `${p.destId}-${st.id}`, title: `${d.name}, ${p.nights} nights`, destId: d.id, at: st.at }, ...h.filter((x) => x.destId !== d.id)].slice(0, 6));
+    syncTrip({
+      destId: p.destId,
+      title: `${d.name}, ${p.nights} nights`,
+      prefs: p,
+      plan: pl,
+      isLive: false,
+      totalMinorUnits: Math.round(pl.totals.total * 100),
+      budgetMinorUnits: Math.round(p.budget * 100),
+    }).then((id) => (tripIdRef.current = id));
     await say(planSummary(pl, fit.adjusted), 300);
     push({ id: nid(), role: "agent", kind: "flights" });
     await sleep(250);

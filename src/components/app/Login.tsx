@@ -7,6 +7,7 @@ import { LogoMark } from "@/components/brand/Logo";
 import { Icon } from "@/components/brand/Icon";
 import { DEMO_USER, historyStore, userStore } from "@/features/ui-mock/tripStore";
 import { gsap, useGSAP } from "@/lib/gsap";
+import { createClient } from "@/lib/supabase/client";
 
 export function Login() {
   const root = useRef<HTMLDivElement>(null);
@@ -14,6 +15,11 @@ export function Login() {
   const params = useSearchParams();
   const next = params.get("next") ?? "/plan";
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [authError, setAuthError] = useState("");
 
   useGSAP(
     () => {
@@ -36,6 +42,31 @@ export function Login() {
       ]);
     }
     setTimeout(() => router.push(next), 700);
+  }
+
+  async function submitAuth(e: React.FormEvent) {
+    e.preventDefault();
+    setAuthError("");
+    setLoading(true);
+    try {
+      if (mode === "signup") {
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, name: name || email.split("@")[0] }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? "Could not create that account.");
+        }
+      }
+      const { error } = await createClient().auth.signInWithPassword({ email, password });
+      if (error) throw new Error(mode === "signup" ? "Account created, but sign-in failed — try signing in." : "Wrong email or password.");
+      router.push(next);
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Something went wrong.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -80,7 +111,7 @@ export function Login() {
             <span>or</span>
           </div>
 
-          <button type="button" className="lg-oauth" disabled title="Available when the real backend is connected">
+          <button type="button" className="lg-oauth" disabled title="Not wired up yet — email/password works below">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
               <path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3Z" />
               <path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.5l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22Z" />
@@ -90,25 +121,46 @@ export function Login() {
             Continue with Google
           </button>
 
-          <form className="lg-fields" onSubmit={(e) => e.preventDefault()}>
+          <form className="lg-fields" onSubmit={submitAuth}>
+            {mode === "signup" && (
+              <label>
+                <span>Name</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Mara Okafor" />
+              </label>
+            )}
             <label>
               <span>Email</span>
-              <input type="email" placeholder="you@example.com" disabled />
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
             </label>
             <label>
               <span>Password</span>
-              <input type="password" placeholder="••••••••" disabled />
+              <input type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
             </label>
-            <button type="submit" className="btn" disabled>
-              Sign in
+            {authError && <p className="lg-error">{authError}</p>}
+            <button type="submit" className="btn" disabled={loading}>
+              {loading ? "Working…" : mode === "signup" ? "Create account" : "Sign in"}
             </button>
           </form>
           <p className="lg-note">
-            <Icon name="shield" size={14} /> Email and Google sign-in switch on with the real backend. The demo account
-            keeps everything in this browser.
+            <Icon name="shield" size={14} /> {mode === "signup" ? "Your plans, chat, and receipts sync to your account." : "Sign in to pick up your trips, chat, and receipts."}
           </p>
           <p className="lg-foot">
-            New here? <Link href="/plan">Plan a trip without an account</Link>
+            {mode === "signup" ? (
+              <>
+                Have an account?{" "}
+                <button type="button" className="lg-link" onClick={() => setMode("signin")}>
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                New here?{" "}
+                <button type="button" className="lg-link" onClick={() => setMode("signup")}>
+                  Create an account
+                </button>{" "}
+                or <Link href="/plan">plan a trip without one</Link>
+              </>
+            )}
           </p>
         </div>
       </main>

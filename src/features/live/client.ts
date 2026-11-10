@@ -114,7 +114,7 @@ export async function createOrder(offers: TravelOfferView[]): Promise<OrderResul
 }
 
 export async function streamCapture(
-  input: { orderId: string; offers: TravelOfferView[]; forceFailureOfferId?: string },
+  input: { orderId: string; offers: TravelOfferView[]; forceFailureOfferId?: string; destId?: string; title?: string },
   onEvent: (event: CaptureStreamEvent) => void,
 ): Promise<void> {
   const response = await fetch("/api/payments/capture", {

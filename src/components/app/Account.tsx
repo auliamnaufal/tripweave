@@ -18,8 +18,8 @@ import {
   useSaved,
   useTripPrefs,
   useUser,
-  userStore,
 } from "@/features/ui-mock/tripStore";
+import { signOut as supabaseSignOut, toggleSaved } from "@/features/db/sync";
 import { gsap, useGSAP } from "@/lib/gsap";
 
 type Tab = "trips" | "saved" | "documents" | "preferences" | "payments" | "settings";
@@ -96,7 +96,10 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
   );
 
   function signOut() {
-    userStore.clear();
+    // Clears every per-person local cache (orders, trip history, saved places,
+    // documents), not just the user record — otherwise the next person on this
+    // browser would still see the signed-out traveller's data.
+    void supabaseSignOut();
     router.push("/");
   }
 
@@ -218,7 +221,10 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                         className="ac-heart"
                         aria-pressed={on}
                         aria-label={on ? `Remove ${d.name}` : `Save ${d.name}`}
-                        onClick={() => savedStore.set(on ? saved.filter((x) => x !== d.id) : [...saved, d.id])}
+                        onClick={() => {
+                          savedStore.set(on ? saved.filter((x) => x !== d.id) : [...saved, d.id]);
+                          toggleSaved(d.id, !on);
+                        }}
                       >
                         <Icon name="heart" size={16} />
                       </button>

@@ -199,9 +199,23 @@
   color: var(--ink-soft);
   font-size: 14px;
 }
-.lg-foot a {
+.lg-foot a,
+.lg-link {
   color: var(--ember-deep);
   font-weight: 500;
+}
+.lg-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.lg-error {
+  margin: 2px 0 0;
+  color: var(--ember-deep);
+  font-size: 13px;
 }
 @media (max-width: 900px) {
   .lg {

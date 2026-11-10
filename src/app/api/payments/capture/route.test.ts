@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 import { capturePlanOrder, refundCapture, type PlanOrderStatus } from "@/features/payments/paypal";
 import { streamBookingAgent, type BookingAgentOutput } from "@/features/agent/bookingAgent";
+import { authedUser } from "@/lib/supabase/authedUser";
 
 vi.mock("@/features/payments/paypal", () => ({
   BUNDLE_REFERENCE_ID: "tripweave-bundle",
@@ -12,6 +13,10 @@ vi.mock("@/features/payments/paypal", () => ({
 vi.mock("@/features/agent/bookingAgent", () => ({
   streamBookingAgent: vi.fn(),
 }));
+
+// Guest by default (no Supabase session) — matches every pre-existing test
+// below, which pays and books with nobody signed in.
+vi.mock("@/lib/supabase/authedUser", () => ({ authedUser: vi.fn(async () => ({ supabase: null, user: null })) }));
 
 const flightOffer = {
   id: "flight-1",
@@ -242,6 +247,28 @@ describe("POST /api/payments/capture", () => {
       bookedMinorUnits: 62000,
       refundedMinorUnits: 0,
     });
+  });
+
+  it("records an order receipt for a signed-in user once payment completes, without blocking booking on it", async () => {
+    vi.mocked(capturePlanOrder).mockResolvedValue(bundleCapture(62000));
+    vi.mocked(streamBookingAgent).mockReturnValue(
+      bookingGenerator({ results: [{ offerId: "flight-1", status: "booked", bookingRef: "ref-1" }], note: "Booked." }),
+    );
+    const insert = vi.fn(async () => ({ error: null }));
+    vi.mocked(authedUser).mockResolvedValueOnce({
+      supabase: { from: vi.fn(() => ({ insert })) } as never,
+      user: { id: "user-1" } as never,
+    });
+
+    const response = await post(
+      JSON.stringify({ orderId: "order-1", offers: [flightOffer], destId: "oahu", title: "5 nights in Oahu" }),
+    );
+    const events = await readLines(response);
+
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: "user-1", dest_id: "oahu", title: "5 nights in Oahu", total_minor_units: 62000 }),
+    );
+    expect(events.at(-1)).toMatchObject({ kind: "summary" });
   });
 
   it("skips the booking agent entirely when every offer was paid directly", async () => {
