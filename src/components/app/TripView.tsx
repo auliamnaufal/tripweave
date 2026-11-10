@@ -6,7 +6,7 @@ import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
-import { useHydrated } from "@/features/ui-mock/tripStore";
+import { useHydrated, useOrders } from "@/features/ui-mock/tripStore";
 import { gsap, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 
@@ -37,6 +37,10 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   const [active, setActive] = useState("itinerary");
   const lenis = useLenis();
   const total = view.total;
+  // Same (destId, total) pairing Booked.tsx records the order under — this plan
+  // was already paid for if an order for it is already in the store.
+  const orders = useOrders();
+  const paid = orders.some((o) => o.destId === view.plan.prefs.destId && o.total === total);
   const flightsTotal = view.flights.reduce((s, f) => s + f.price, 0);
   const actTotal = view.activities.reduce((s, a) => s + a.price, 0);
   const breakdown = [
@@ -321,14 +325,22 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 </li>
               ))}
             </ul>
-            <Link href="/checkout" className="pay-btn">
-              Pay once with{" "}
-              <b>
-                <span>Pay</span>
-                <span>Pal</span>
-              </b>
-            </Link>
-            <p className="trip-fine">One approval covers every booking. Nothing is stored after you pay.</p>
+            {paid ? (
+              <Link href="/booked" className="btn" style={{ width: "100%" }}>
+                <Icon name="check" size={16} /> Paid · view booking
+              </Link>
+            ) : (
+              <Link href="/checkout" className="pay-btn">
+                Pay once with{" "}
+                <b>
+                  <span>Pay</span>
+                  <span>Pal</span>
+                </b>
+              </Link>
+            )}
+            <p className="trip-fine">
+              {paid ? "This trip is paid for. Every booking is already underway." : "One approval covers every booking. Nothing is stored after you pay."}
+            </p>
           </div>
           <form className="trip-ask" onSubmit={(e) => e.preventDefault()}>
             <Icon name="spark" size={16} />
