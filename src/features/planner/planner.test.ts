@@ -110,6 +110,37 @@ describe("buildItinerary", () => {
     expect(plan.violations).toContainEqual({ kind: "outside-trip-window", offerId: "early" });
   });
 
+  it("keeps a return flight that lands late on the last local day inside the window", () => {
+    const utcWindowBrief: TripBrief = {
+      ...brief,
+      travelWindow: {
+        startsAt: zonedDateTime("2026-07-10T00:00:00Z"),
+        endsAt: zonedDateTime("2026-07-15T23:59:59Z"),
+      },
+    };
+    const plan = buildItinerary(utcWindowBrief, [
+      offer("return", {
+        productKind: "flight",
+        startsAt: zonedDateTime("2026-07-15T15:00:00-10:00"),
+        endsAt: zonedDateTime("2026-07-15T22:30:00-07:00"),
+      }),
+    ]);
+
+    expect(plan.violations).not.toContainEqual({ kind: "outside-trip-window", offerId: "return" });
+  });
+
+  it("flags a return flight that lands the day after the trip ends", () => {
+    const plan = buildItinerary(brief, [
+      offer("redeye", {
+        productKind: "flight",
+        startsAt: zonedDateTime("2026-07-15T22:00:00-10:00"),
+        endsAt: zonedDateTime("2026-07-16T06:00:00-07:00"),
+      }),
+    ]);
+
+    expect(plan.violations).toContainEqual({ kind: "outside-trip-window", offerId: "redeye" });
+  });
+
   it("does not treat a full-stay hotel as overlapping in-stay activities", () => {
     const plan = buildItinerary(brief, [
       offer("hotel", {

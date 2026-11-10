@@ -2,17 +2,15 @@ import { ChatOpenAI } from "@langchain/openai";
 
 /** Shared between plannerAgent and bookingAgent: both are thin LangGraph ReAct loops over the same provider. */
 export function createAgentModel(): ChatOpenAI {
-  const model = process.env.COMMAND_CODE_MODEL;
-  if (!model) throw new Error("COMMAND_CODE_MODEL is not configured.");
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured.");
+  // gpt-6-luna only accepts the default temperature, so none is set here, and
+  // it rejects function tools on /v1/chat/completions, so the agents' tool
+  // calls go through the Responses API instead.
   return new ChatOpenAI({
-    model,
-    apiKey: process.env.COMMAND_CODE_API_KEY,
-    temperature: 0,
-    configuration: {
-      baseURL:
-        process.env.COMMAND_CODE_PROVIDER_BASE_URL ??
-        "https://api.commandcode.ai/provider/v1",
-    },
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
+    apiKey,
+    useResponsesApi: true,
   });
 }
 
