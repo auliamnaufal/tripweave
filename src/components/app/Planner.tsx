@@ -14,11 +14,13 @@ import {
   fitToBudget,
   flightTotal,
   getDestination,
+  registerCustomDestination,
+  type CustomPlace,
   type Destination,
   type TripPrefs,
 } from "@/features/ui-mock/destinations";
 import { acknowledgements, applyAnswer, planSummary, questions, suggestionsFor, type QuestionId } from "@/features/ui-mock/agentScript";
-import { docsStore, historyStore, savedStore, tripStore, useDocs, useHistory, useHydrated, useSaved, useUser } from "@/features/ui-mock/tripStore";
+import { docsStore, historyStore, savedStore, tripStore, useDocs, useHydrated, useSaved, useUser } from "@/features/ui-mock/tripStore";
 import { tabKeys } from "@/components/app/tabKeys";
 import {
   blockers,
@@ -38,8 +40,13 @@ import {
   type TravelDoc,
 } from "@/features/ui-mock/documents";
 import { DocChecklist, useDocPicker } from "@/components/app/TravelDocs";
+import { DealLine } from "@/components/app/DealPanel";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
-import { briefFromPrefs, streamPlan, type TripBriefWire } from "@/features/live/client";
+import { briefFromPrefs, homeOrigin, readTrip, streamPlan, swapOption, type TripBriefWire } from "@/features/live/client";
+import { LiveOptions } from "@/components/app/LiveOptions";
+import { AppSidebar, MobileNav, useSidebarCollapsed } from "@/components/app/AppSidebar";
+import { AccountMenu } from "@/components/app/AccountMenu";
+import type { AlternativeSlot } from "@/features/suppliers/alternatives";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
 import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
 import { logChatMessage, syncTrip } from "@/features/db/sync";
@@ -57,14 +64,6 @@ type Block =
   | { id: string; role: "agent"; kind: "work"; title: string; steps: Step[]; done: boolean }
   | { id: string; role: "agent"; kind: "flights" | "hotels" | "food" | "days" | "plan" | "places" };
 
-const nav: { icon: IconName; label: string; href: string; active?: boolean }[] = [
-  { icon: "chat", label: "Planner", href: "/plan", active: true },
-  { icon: "ticket", label: "My trips", href: "/account?tab=trips" },
-  { icon: "heart", label: "Saved places", href: "/account?tab=saved" },
-  { icon: "passport", label: "Travel documents", href: "/account?tab=documents" },
-  { icon: "globe", label: "Explore", href: "/#journeys" },
-  { icon: "user", label: "Account", href: "/account" },
-];
 
 const toolIcon: Record<string, IconName> = {
   search_flights: "plane",
@@ -115,7 +114,6 @@ export function Planner() {
   const user = useUser();
   const hydrated = useHydrated();
   const ready = hydrated && !!user;
-  const history = useHistory();
   const firstName = user?.firstName ?? "there";
 
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -129,7 +127,8 @@ export function Planner() {
   const [input, setInput] = useState("");
   const [panelTab, setPanelTab] = useState<"overview" | "todo" | "map">("overview");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  // Shared with every app page, so the sidebar keeps its shape as you move around.
+  const collapsed = useSidebarCollapsed();
   const [dragging, setDragging] = useState(false);
   const docs = useDocs();
   const saved = useSaved();
@@ -239,7 +238,7 @@ export function Planner() {
   }
 
   /** Streams the real planner agent into a work card. Returns null if it fails. */
-  async function runLiveAgent(title: string, p: TripPrefs, brief: TripBriefWire): Promise<LivePlan | null> {
+  async function runLiveAgent(title: string, p: TripPrefs, brief: TripBriefWire, place?: CustomPlace): Promise<LivePlan | null> {
     const id = nid();
     let n = 0;
     const step = (tool: string, label: string): Step => ({ id: `${id}-${n++}`, tool, label, status: "running" });
@@ -265,7 +264,7 @@ export function Planner() {
           });
           setStage((s) => Math.max(s, liveStage[event.tool] ?? s));
         } else if (event.kind === "plan") {
-          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt };
+          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt, quoteId: event.quoteId, comparisons: event.comparisons, deal: event.deal, alternatives: event.alternatives, ...(place ? { place } : {}) };
         } else if (event.kind === "error") {
           out.failure = event.message;
         }
@@ -311,19 +310,78 @@ export function Planner() {
     setBusy(true);
     setSuggestions([]);
     push({ id: nid(), role: "user", text: value });
-    const d = value.toLowerCase().includes("surprise") ? pickRandom(destinations) : findDestination(value);
+    const exact = destinations.find((x) => x.name.toLowerCase() === value.toLowerCase());
+    const d = value.toLowerCase().includes("surprise") ? pickRandom(destinations) : exact;
     if (!d) {
-      await say("I don’t have demo data for that place yet. These are the places I can plan end to end right now:");
-      push({ id: nid(), role: "agent", kind: "places" });
-      setBusy(false);
+      await planFromText(value);
       return;
     }
-    const p = defaultPrefs(d.id);
+    // Fly from the traveller's saved home airport, not a hard-coded city.
+    const p = { ...defaultPrefs(d.id), origin: user?.homeAirport ? homeOrigin(user.homeAirport).city : defaultPrefs(d.id).origin };
     updatePrefs(p);
     setStage(0);
     await say(`${d.name}, good choice. ${d.blurb} A few quick questions so I search for the right things.`);
     await askQuestion(0, d, p);
     setBusy(false);
+  }
+
+  /**
+   * Anything typed ("Japan: Tokyo day 1, Osaka day 2, Mount Fuji day 3") goes
+   * to the intake agent, which turns it into a route and a brief; then the
+   * deal-hunting agent plans it like any other trip. No scripted questions.
+   */
+  async function planFromText(text: string) {
+    const tid = nid();
+    push({ id: tid, role: "agent", kind: "typing" });
+    const home = homeOrigin(user?.homeAirport);
+    let result: Awaited<ReturnType<typeof readTrip>>;
+    try {
+      result = await readTrip(text, { origin: home, travelers: 2, budgetUsd: 4000 });
+    } catch (error) {
+      remove(tid);
+      await say(error instanceof Error ? error.message : "I couldn’t read that request.");
+      setBusy(false);
+      return;
+    }
+    remove(tid);
+    if (result.kind === "clarify") {
+      await say(result.question);
+      push({ id: nid(), role: "agent", kind: "places" });
+      setBusy(false);
+      return;
+    }
+    const { brief, summary, stops } = result;
+    const route = stops.map((stop) => stop.city).filter((city, i, all) => i === 0 || all[i - 1] !== city);
+    const single = stops.length === 1 ? destinations.find((x) => x.name.toLowerCase() === stops[0].city.toLowerCase()) : undefined;
+    let place: CustomPlace | undefined;
+    if (!single) {
+      place = {
+        id: `custom-${route.join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        name: route.join(" · "),
+        country: stops[0].country,
+        airport: "",
+        route,
+      };
+      registerCustomDestination(place);
+    }
+    const destId = single?.id ?? place!.id;
+    const nights = stops.reduce((sum, stop) => sum + stop.nights, 0);
+    const start = new Date(brief.travelWindow.startsAt);
+    const p: TripPrefs = {
+      ...defaultPrefs(destId),
+      destId,
+      origin: brief.origin.city,
+      nights,
+      travelers: brief.travelers,
+      travelerLabel: brief.travelers === 1 ? "Just me" : brief.travelers === 2 ? "Two of us" : `${brief.travelers} of us`,
+      budget: Math.round(brief.hardBudget.amountMinorUnits / 100),
+      vibes: brief.preferences,
+      when: start.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+    };
+    updatePrefs(p);
+    setStage(0);
+    await say(`${summary} I’ll search every partner platform for the best deal on each part.`);
+    await makePlan(p, brief, place);
   }
 
   async function answer(qid: QuestionId, value: string) {
@@ -350,7 +408,7 @@ export function Planner() {
     }
   }
 
-  async function makePlan(input: TripPrefs) {
+  async function makePlan(input: TripPrefs, briefOverride?: TripBriefWire, place?: CustomPlace) {
     let p = input;
     setBusy(true);
     setQIndex(null);
@@ -361,7 +419,7 @@ export function Planner() {
     livePlanStore.set(null);
     livePaymentStore.set(null);
     prevLive.current = null;
-    const liveResult = await runLiveAgent(`Planning ${d.name}`, p, briefFromPrefs(p));
+    const liveResult = await runLiveAgent(`Planning ${d.name}`, p, briefOverride ?? briefFromPrefs(p), place);
     if (!alive.current) return;
     if (liveResult) {
       p = syncHotel(p, liveResult);
@@ -730,9 +788,63 @@ export function Planner() {
     setBusy(false);
   }
 
+  /**
+   * Swaps one flight leg or stay for another option from the same search.
+   * Instant: the server rebuilds the plan from the saved catalog, no new
+   * search, no agent run. Every card reads the live plan, so all of them follow.
+   */
+  async function swapLive(fromOfferId: string, toOfferId: string) {
+    const current = livePlanStore.get();
+    if (!current?.quoteId || busy) return;
+    setBusy(true);
+    setSuggestions([]);
+    try {
+      const result = await swapOption(current.quoteId, fromOfferId, toOfferId);
+      prevLive.current = current;
+      livePlanStore.set({
+        ...current,
+        plan: result.plan,
+        note: result.note,
+        quoteId: result.quoteId,
+        deal: result.deal,
+        comparisons: result.comparisons,
+        alternatives: result.alternatives,
+        retrievedAt: result.retrievedAt,
+      });
+      livePaymentStore.set(null);
+      const view = liveView({ ...current, plan: result.plan, deal: result.deal, alternatives: result.alternatives });
+      await say(`${result.note} New total ${usd.format(view.total)}. Say “undo that” to switch back.`, 150);
+    } catch (error) {
+      await say(error instanceof Error ? error.message : "I couldn’t change that option.", 150);
+    }
+    setSuggestions(liveSuggestions("plan", getDestination(prefsRef.current?.destId).name));
+    setBusy(false);
+  }
+
+  /** "Make the hotel cheaper" / "Find a cheaper flight": the cheapest cheaper option, swapped in instantly. */
+  function cheaperSwap(kind: "flight" | "hotel"): { from: string; to: string } | null {
+    const slots = livePlanStore.get()?.alternatives?.filter((slot) => slot.kind === kind) ?? [];
+    let best: { from: string; to: string; saving: number } | null = null;
+    for (const slot of slots) {
+      const current = slot.options.find((option) => option.offerId === slot.currentOfferId);
+      const cheapest = slot.options[0];
+      if (!current || !cheapest || cheapest.offerId === current.offerId) continue;
+      const saving = current.costMinorUnits - cheapest.costMinorUnits;
+      if (saving > 0 && (!best || saving > best.saving)) best = { from: current.offerId, to: cheapest.offerId, saving };
+    }
+    return best;
+  }
+
   function route(text: string) {
     const value = text.trim();
     if (!value || busy) return;
+    const wantsCheaper = /cheaper|lebih murah|murah/i.test(value) ? (/hotel|stay|penginapan/i.test(value) ? "hotel" : /flight|fare|tiket|pesawat/i.test(value) ? "flight" : null) : null;
+    if (wantsCheaper && livePlanStore.get()?.alternatives) {
+      push({ id: nid(), role: "user", text: value });
+      const swap = cheaperSwap(wantsCheaper);
+      if (swap) return void swapLive(swap.from, swap.to);
+      return void say(`This is already the cheapest ${wantsCheaper} across every platform I searched.`, 150);
+    }
     const q = qIndex !== null ? questions[qIndex] : null;
     if (/\bundo\b/i.test(value) && docUndo.current) return void restoreDoc(value);
     docUndo.current = null;
@@ -748,6 +860,12 @@ export function Planner() {
     if (!text.trim() || busy) return;
     setInput("");
     route(text);
+  }
+
+  function openRecent(destId: string) {
+    if (busy) return;
+    reset();
+    void start(getDestination(destId).name);
   }
 
   function reset() {
@@ -787,81 +905,18 @@ export function Planner() {
   return (
     <div ref={root} className={`pl ${collapsed ? "is-collapsed" : ""}`}>
       <aside className="pl-side" aria-label="Workspace">
-        <div className="pl-side-top">
-          <Link href="/" className="logo pl-logo" aria-label="Tripweave home">
-            <LogoMark />
-            <span>Tripweave</span>
-          </Link>
-          <button type="button" className="pl-collapse" onClick={() => setCollapsed((v) => !v)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-            <Icon name="chevron" size={16} />
-          </button>
-        </div>
-        <button type="button" className="pl-new" onClick={reset} data-tip="New trip">
-          <Icon name="plus" size={16} />
-          <span>New trip</span>
-        </button>
-        <nav className="pl-nav">
-          {nav.map((n) => (
-            <Link key={n.label} href={n.href} className={n.active ? "is-active" : ""} data-tip={n.label}>
-              <Icon name={n.icon} size={18} />
-              <span>{n.label}</span>
-            </Link>
-          ))}
-        </nav>
-        <div className="pl-recent">
-          <p className="pl-label">Recent plans</p>
-          {history.length === 0 ? (
-            <p className="pl-recent-empty">No trips yet. Plans you make show up here.</p>
-          ) : (
-            history.map((h) => (
-              <button key={h.id} type="button" onClick={() => !busy && (reset(), void start(getDestination(h.destId).name))}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={getDestination(h.destId).card} alt="" />
-                <span>{h.title}</span>
-              </button>
-            ))
-          )}
-        </div>
-        {user ? (
-          <Link href="/account" className="pl-user" data-tip="Account">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={user.avatar} alt="" />
-            <span>
-              <b>{user.name}</b>
-              <small>Demo account</small>
-            </span>
-          </Link>
-        ) : (
-          <Link href="/login?next=/plan" className="pl-user pl-user-guest" data-tip="Sign in">
-            <span className="pl-user-icon">
-              <Icon name="user" size={18} />
-            </span>
-            <span>
-              <b>Sign in</b>
-              <small>Save trips across devices</small>
-            </span>
-          </Link>
-        )}
+        <AppSidebar onNewTrip={reset} onRecent={openRecent} busy={busy} />
       </aside>
 
       <main className="pl-main">
         <header className="pl-mobilebar">
-          <Link href="/" className="logo" aria-label="Tripweave home">
-            <LogoMark />
-          </Link>
+          <MobileNav onNewTrip={reset} onRecent={openRecent} busy={busy} />
           <span>{dest ? dest.name : "New trip"}</span>
           <div className="pl-mobilebar-actions">
             <button ref={planChip} type="button" className="chip" onClick={() => setPanelOpen(true)} disabled={!dest} aria-expanded={panelOpen}>
               <Icon name="map" /> Plan
             </button>
-            <Link href={user ? "/account" : "/login?next=/plan"} className="pl-mobile-account" aria-label={user ? "Account" : "Sign in"}>
-              {user ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={user.avatar} alt="" />
-              ) : (
-                <Icon name="user" size={18} />
-              )}
-            </Link>
+            <AccountMenu />
           </div>
         </header>
         <p className="sr-only" role="status">
@@ -873,7 +928,7 @@ export function Planner() {
             <div className="pl-welcome">
               <p className="pl-hi">Hi {firstName}</p>
               <h1>Where do you want to go?</h1>
-              <p className="pl-welcome-sub">Name a place or pick one below. I’ll ask four or five quick questions, then do all the searching.</p>
+              <p className="pl-welcome-sub">Describe the trip in your own words: cities, days, what you want to see. Or pick a place below. I’ll search every partner platform for the best deal.</p>
               <form
                 className="pl-welcome-form"
                 onSubmit={(e) => {
@@ -885,7 +940,7 @@ export function Planner() {
                 <label htmlFor="pl-where" className="sr-only">
                   Destination
                 </label>
-                <input id="pl-where" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Kyoto, Lisbon, somewhere warm…" autoComplete="off" />
+                <input id="pl-where" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Japan: Tokyo day 1, Osaka day 2, Mount Fuji day 3…" autoComplete="off" />
                 <button type="submit" className="btn btn-ember btn-sm" disabled={!input.trim()}>
                   Start
                   <span className="btn-arrow">
@@ -952,6 +1007,8 @@ export function Planner() {
                         onAnswer={answer}
                         onSkip={skipQuestions}
                         onPick={pickOption}
+                        alternatives={live?.alternatives}
+                        onSwap={swapLive}
                         onStart={start}
                         lv={lv}
                       />
@@ -976,6 +1033,20 @@ export function Planner() {
           )}
         </div>
 
+        {planned && lv && (
+          <div className="pl-actionbar" role="region" aria-label="Your plan">
+            <span className="pl-actionbar-total">
+              <b>{usd.format(lv.total)}</b>
+              <small>{lv.title}</small>
+            </span>
+            <Link href="/trip" className="btn btn-sm">
+              View itinerary
+            </Link>
+            <Link href="/checkout" className="btn btn-sm btn-ember">
+              Pay once with PayPal
+            </Link>
+          </div>
+        )}
         {blocks.length > 0 && (
           <form
             className="pl-composer"
@@ -1239,8 +1310,12 @@ function AgentBlock({
   onPick,
   onStart,
   lv,
+  alternatives,
+  onSwap,
 }: {
   lv: LiveView | null;
+  alternatives?: AlternativeSlot[];
+  onSwap: (fromOfferId: string, toOfferId: string) => void;
   block: Exclude<Block, { role: "user" }>;
   prefs: TripPrefs | null;
   docPrefs: TripPrefs | null;
@@ -1350,6 +1425,12 @@ function AgentBlock({
         ))}
       </div>
     );
+  }
+  if (block.kind === "flights" && lv && alternatives?.some((slot) => slot.kind === "flight")) {
+    return <LiveOptions slots={alternatives} kind="flight" busy={busy} onSwap={onSwap} />;
+  }
+  if (block.kind === "hotels" && lv && alternatives?.some((slot) => slot.kind === "hotel")) {
+    return <LiveOptions slots={alternatives} kind="hotel" busy={busy} onSwap={onSwap} />;
   }
   if (block.kind === "flights" && lv) {
     return (
@@ -1498,6 +1579,7 @@ function AgentBlock({
           <div className={`budget-bar ${plan.underBy < 0 ? "is-over" : ""}`}>
             <i style={{ width: `${Math.min(100, (plan.totals.total / plan.prefs.budget) * 100)}%` }} />
           </div>
+          {lv?.deal && <DealLine deal={lv.deal} />}
           <div className="pl-plan-actions">
             <Link href="/trip" className="btn btn-sm">
               Open itinerary

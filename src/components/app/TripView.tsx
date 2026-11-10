@@ -9,6 +9,7 @@ import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripVi
 import { savedStore, useHydrated, useOrders, useSaved } from "@/features/ui-mock/tripStore";
 import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
+import { DealPanel } from "@/components/app/DealPanel";
 
 const kindIcon: Record<string, IconName> = {
   flight: "plane",
@@ -175,7 +176,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
         <img className="trip-hero-img" src={view.hero} alt="" />
         <div className="trip-hero-shade" />
         <div className="trip-hero-copy app-wrap">
-          <span className="tag-sample trip-tag">{isLive(view) ? "Planned by the agent · live flight fares" : "Sample itinerary"}</span>
+          <span className="tag-sample trip-tag">{isLive(view) ? "Planned by the agent · best deal across partner platforms" : "Sample itinerary"}</span>
           <h1 className="trip-title display">{view.title}</h1>
           <ul className="trip-hero-meta">
             <li>
@@ -216,6 +217,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 <Icon name="spark" size={16} /> {view.note}
               </p>
             )}
+            {isLive(view) && view.deal && <DealPanel deal={view.deal} />}
             <div className="trip-days">
               <span className="trip-thread" aria-hidden="true">
                 <i className="trip-thread-fill" />
@@ -296,7 +298,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 </span>
                 <h3>{view.hotel.name}</h3>
                 <p className="trip-stay-rating">
-                  <Icon name="star" size={14} /> {view.hotel.rating} · {view.hotel.reviews} reviews
+                  <Icon name="star" size={14} /> {view.hotel.rating}{view.hotel.reviews > 0 ? ` · ${view.hotel.reviews} reviews` : ""}
                 </p>
                 <ul>
                   {view.hotel.perks.map((p) => (

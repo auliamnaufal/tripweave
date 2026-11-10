@@ -22,6 +22,20 @@ export type TravelOffer = {
    * Tripweave's bundle unit. See docs/adr/0002-multi-payee-orders-pay-suppliers-directly.md.
    */
   supplierPayeeEmail?: string;
+  /**
+   * The same real-world product across platforms, set by the adapter when it
+   * can identify it (e.g. `flight:AA123@2026-12-10T06:58`). Offers that share
+   * it are compared on price. Offers without one are never merged.
+   */
+  productKey?: string;
+  /**
+   * The market this offer competes in, e.g. `flight-market:SFO-LIS@2026-12-20`:
+   * different products a traveller could swap for each other. Used to compare
+   * against metasearch fares that can't be matched to the exact flight.
+   */
+  marketKey?: string;
+  /** The supplier's own public page for this offer (a deeplink offer's only way to buy it). */
+  listingUrl?: string;
 };
 
 export type OfferViolation =
@@ -68,6 +82,9 @@ export const travelOfferSchema = z
     cancellationTerms: z.string().nullable(),
     synthetic: z.boolean(),
     supplierPayeeEmail: z.string().email().optional(),
+    productKey: z.string().min(1).max(200).optional(),
+    marketKey: z.string().min(1).max(200).optional(),
+    listingUrl: z.string().url().refine((url) => url.startsWith("https://"), "Listing links must be https.").optional(),
   })
   // A flight is never a legitimate Onboarded Supplier (GLOSSARY.md): airline
   // ticketing settles via IATA's Billing and Settlement Plan, not through any

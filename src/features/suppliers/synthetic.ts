@@ -2,6 +2,9 @@ import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 import { findDestination, type Destination } from "@/features/ui-mock/destinations";
+import type { SupplierAdapter } from "./adapter";
+import { isMultiCity, stayForDay, tripStays } from "@/features/planner/itinerary";
+import { simulateBooking } from "./booking";
 
 // ponytail: the destination catalog still lives with the UI placeholder data.
 // Hotels and activities for the 7 catalog destinations come from there so the
@@ -55,6 +58,9 @@ function makeOffer(
     expiresAt,
     cancellationTerms: "Fully refundable within 24 hours (synthetic).",
     synthetic: true,
+    // Stays and activities can be resold by partners and compared; sample
+    // flights never are (real flights come from Duffel).
+    ...(productKind === "flight" ? {} : { productKey: `${productKind}:synthetic-${id}@${iso(startsAtMs).slice(0, 10)}` }),
   };
 }
 
@@ -105,6 +111,7 @@ export function searchFlights(brief: TripBrief, now: () => Date = () => new Date
 }
 
 export function searchHotels(brief: TripBrief, now: () => Date = () => new Date()): TravelOffer[] {
+  if (isMultiCity(brief)) return multiCityHotels(brief, now);
   const { retrievedAt, expiresAt } = stamp(now);
   const start = Date.parse(brief.travelWindow.startsAt);
   const end = Date.parse(brief.travelWindow.endsAt);
@@ -209,6 +216,10 @@ const activityTemplates: ActivityTemplate[] = [
 ];
 
 export function searchActivities(brief: TripBrief, now: () => Date = () => new Date()): TravelOffer[] {
+  return [...(isMultiCity(brief) ? multiCityActivities(brief, now) : singleCityActivities(brief, now)), ...requestedActivities(brief, now)];
+}
+
+function singleCityActivities(brief: TripBrief, now: () => Date): TravelOffer[] {
   const { retrievedAt, expiresAt } = stamp(now);
   const start = Date.parse(brief.travelWindow.startsAt);
   const end = Date.parse(brief.travelWindow.endsAt);
@@ -258,6 +269,98 @@ export function searchActivities(brief: TripBrief, now: () => Date = () => new D
   );
 }
 
+/** One stay per stop: the catalog's hotels where the city has them, a sample hotel otherwise. */
+function multiCityHotels(brief: TripBrief, now: () => Date): TravelOffer[] {
+  const { retrievedAt, expiresAt } = stamp(now);
+  return tripStays(brief).flatMap((stay) => {
+    const catalog = findDestination(`${stay.city} ${stay.country}`);
+    const rooms = brief.travelers > 2 ? Math.ceil(brief.travelers / 2) : 1;
+    const options = catalog
+      ? catalog.hotels.map((hotel) => ({ id: hotel.id, name: hotel.name, area: hotel.area, nightly: hotel.nightly }))
+      : [
+          { id: "central", name: `${stay.city} central hotel`, area: "City centre", nightly: 160 },
+          { id: "boutique", name: `${stay.city} boutique stay`, area: "Old town", nightly: 210 },
+        ];
+    return options.map((hotel) =>
+      makeOffer(
+        `hotel-s${stay.index}-${hotel.id}`,
+        "hotel",
+        hotel.name,
+        `${hotel.area}, ${stay.city}. ${hotel.nightly}/night x ${stay.nights} nights${rooms > 1 ? ` x ${rooms} rooms` : ""}.`,
+        stay.checkInMs,
+        stay.checkOutMs,
+        hotel.nightly * stay.nights * rooms * 100,
+        retrievedAt,
+        expiresAt,
+      ),
+    );
+  });
+}
+
+/** Activities on each stop's own days, from the catalog where the city has one. */
+function multiCityActivities(brief: TripBrief, now: () => Date): TravelOffer[] {
+  const { retrievedAt, expiresAt } = stamp(now);
+  const start = Date.parse(brief.travelWindow.startsAt);
+  const offers: TravelOffer[] = [];
+  for (const stay of tripStays(brief)) {
+    const catalog = findDestination(`${stay.city} ${stay.country}`);
+    for (let day = stay.firstDay; day < stay.firstDay + stay.nights; day++) {
+      const dayStart = start + (day - 1) * 24 * hourMs;
+      if (catalog) {
+        for (const activity of catalog.activities) {
+          const begin = dayStart + parseSlot(activity.slot) * hourMs;
+          offers.push(makeOffer(`activity-${day}-${activity.id}`, "activity", activity.title, `${activity.category} in ${stay.city}, ${activity.duration}.`, begin, begin + parseHours(activity.duration) * hourMs, activity.pricePerPerson * brief.travelers * 100, retrievedAt, expiresAt));
+        }
+      } else {
+        const template = activityTemplates[day % activityTemplates.length];
+        offers.push(makeOffer(`activity-${day}-${template.slug}`, "activity", `${template.title}, ${stay.city}`, template.summary, dayStart + template.hourOffset * hourMs, dayStart + (template.hourOffset + template.durationHours) * hourMs, template.costMinorUnits, retrievedAt, expiresAt));
+      }
+    }
+  }
+  return offers.filter((offer) => withinWindow(brief, Date.parse(offer.startsAt), Date.parse(offer.endsAt)));
+}
+
+const DAY_TRIP = /\b(fuji|mount|mt\.?|day trip|excursion|hike|trek|safari|island|volcano|national park)\b/i;
+const TOUR = /\b(tour|temple|shrine|castle|palace|museum|market|walk|cruise|show|class)\b/i;
+const FOOD = /\b(food|eat|dinner|lunch|street food|ramen|sushi|tasting|cafe)\b/i;
+
+/**
+ * What the traveller asked for on a given day ("Day 3: Mount Fuji") becomes a
+ * bookable local-operator activity on that day, so the agent can honour it.
+ * Arrival and departure days get a shorter, later or earlier slot.
+ */
+function requestedActivities(brief: TripBrief, now: () => Date): TravelOffer[] {
+  if (!brief.dayPlans?.length) return [];
+  const { retrievedAt, expiresAt } = stamp(now);
+  const start = Date.parse(brief.travelWindow.startsAt);
+  const totalDays = Math.round((Date.parse(brief.travelWindow.endsAt) - start) / (24 * hourMs)) + 1;
+  return brief.dayPlans
+    .filter((plan) => plan.day >= 1 && plan.day <= totalDays)
+    .map((plan) => {
+      const stay = stayForDay(brief, plan.day);
+      const dayStart = start + (plan.day - 1) * 24 * hourMs;
+      const dayTrip = DAY_TRIP.test(plan.wish);
+      const perPerson = dayTrip ? 120 : TOUR.test(plan.wish) ? 55 : FOOD.test(plan.wish) ? 45 : 40;
+      const first = plan.day === 1;
+      const last = plan.day === totalDays;
+      const [from, hours] = first ? [16, 3] : last ? [8, 2] : dayTrip ? [8, 9] : [10, 3];
+      const slug = plan.wish.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "request";
+      const title = plan.wish.charAt(0).toUpperCase() + plan.wish.slice(1);
+      return makeOffer(
+        `activity-${plan.day}-wish-${slug}`,
+        "activity",
+        dayTrip && !/trip|tour/i.test(title) ? `${title} day trip` : title,
+        `You asked for this on day ${plan.day}. ${dayTrip ? "Full-day guided trip with transport" : "Guided, about 3 hours"} from ${stay.city}. ${perPerson} per person.`,
+        dayStart + from * hourMs,
+        dayStart + (from + hours) * hourMs,
+        perPerson * brief.travelers * 100,
+        retrievedAt,
+        expiresAt,
+      );
+    })
+    .filter((offer) => withinWindow(brief, Date.parse(offer.startsAt), Date.parse(offer.endsAt)));
+}
+
 export function searchAllOffers(brief: TripBrief, now?: () => Date): TravelOffer[] {
   return [
     ...searchFlights(brief, now),
@@ -265,3 +368,24 @@ export function searchAllOffers(brief: TripBrief, now?: () => Date): TravelOffer
     ...searchActivities(brief, now),
   ];
 }
+
+const syntheticSearch = { flight: searchFlights, hotel: searchHotels, activity: searchActivities } as const;
+
+/**
+ * Sample data for every kind. The registry uses it as the only hotel and
+ * activity source until a real API is approved, and never for flights unless
+ * configured as a fallback. Prices never move, so reprice only refreshes the stamp.
+ */
+export function createSyntheticAdapter(now: () => Date = () => new Date()): SupplierAdapter {
+  return {
+    name: "synthetic",
+    kinds: ["flight", "hotel", "activity"],
+    capability: "bookable",
+    isConfigured: () => true,
+    search: async (brief, kind) => syntheticSearch[kind](brief, now),
+    reprice: async (offer) => ({ status: "unchanged", offer: { ...offer, ...stamp(now) } }),
+    book: async (offer, context) => simulateBooking(offer, context.forceFail === true),
+  };
+}
+
+export const syntheticAdapter = createSyntheticAdapter();

@@ -173,7 +173,6 @@
 
 @media (max-width: 960px) {
   .site-nav-links,
-  .site-nav-signin,
   .site-nav-user span {
     display: none;
   }
@@ -185,6 +184,10 @@
   .site-nav-cta {
     display: none;
   }
+}
+.mobile-menu-account {
+  color: var(--on-dark-soft);
+  font-size: 16px;
 }
 
 /* ───────────── Hero ───────────── */
@@ -2217,4 +2220,24 @@
   .closing-form .btn {
     width: 100%;
   }
+}
+
+.mobile-menu-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mobile-menu-account a {
+  color: var(--on-dark-soft);
+}
+.mobile-menu-signout {
+  padding: 8px 14px;
+  border: 1px solid var(--on-dark-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-dark);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
 }

@@ -52,12 +52,14 @@ describe("parseAgentFinalMessage", () => {
 });
 
 describe("makePlannerTools", () => {
-  it("exposes the four planner tools by name", async () => {
-    const { tools } = await makePlannerTools(brief);
+  it("exposes the deal-hunting planner tools by name", async () => {
+    const { tools } = makePlannerTools(brief, []);
     expect(tools.map((item) => item.name)).toEqual([
       "search_flights",
       "search_hotels",
       "search_activities",
+      "compare_platforms",
+      "check_market",
       "build_itinerary",
     ]);
   });

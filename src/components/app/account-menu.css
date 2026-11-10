@@ -1,0 +1,320 @@
+/* ───────── Account menu ───────── */
+.am {
+  position: relative;
+}
+
+.am-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px 3px 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.am.is-dark .am-trigger {
+  background: transparent;
+  border-color: var(--on-dark-line);
+  color: var(--on-dark);
+}
+
+.am-trigger:hover {
+  border-color: var(--line-strong);
+}
+
+.am-trigger:focus-visible,
+.am-item:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
+
+.am-trigger img {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.am-trigger svg {
+  color: var(--ink-faint);
+}
+
+.am-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  min-width: 230px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  display: grid;
+  gap: 2px;
+}
+
+.am.is-left .am-menu {
+  left: 0;
+  right: auto;
+}
+
+.am-head {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.am-head b {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.am-head small {
+  color: var(--ink-faint);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.am-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.am-item svg {
+  color: var(--ink-soft);
+}
+
+.am-item:hover {
+  background: var(--paper);
+}
+
+.am-item.is-danger,
+.am-item.is-danger svg {
+  color: var(--ember-deep);
+}
+
+.am-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.am-signin {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.am-signin.is-dark {
+  color: var(--on-dark);
+}
+
+.am-signin.is-sidebar {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: center;
+}
+
+/* Sidebar variant: a full-width card at the foot of the sidebar, opening upwards */
+.am.is-sidebar .am-trigger {
+  width: 100%;
+  padding: 8px;
+  border-radius: 14px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.am.is-sidebar .am-trigger img {
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+
+.am-who {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.2;
+}
+
+.am-who b {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am-who small {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am.is-sidebar .am-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  width: max(100%, 230px);
+}
+
+.am.is-sidebar.is-collapsed .am-trigger {
+  width: auto;
+  padding: 4px;
+  border-radius: 50%;
+  position: relative;
+}
+
+/* ───────── App shell: the planner's sidebar on every app page ───────── */
+.app-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  height: 100%;
+}
+
+.app-side .pl-recent {
+  flex: 1;
+}
+
+.app-side-account {
+  margin-top: auto;
+}
+
+.shell {
+  --side: 256px;
+  display: grid;
+  grid-template-columns: var(--side) minmax(0, 1fr);
+  min-height: 100svh;
+  background: var(--paper-2);
+  transition: grid-template-columns 0.5s var(--ease-out);
+}
+
+.shell.is-collapsed {
+  --side: 76px;
+}
+
+.shell-side {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  background: var(--paper-2);
+  z-index: 40;
+}
+
+.shell-main {
+  min-width: 0;
+  background: var(--paper);
+}
+
+.shell-mobilebar {
+  display: none;
+}
+
+.app-menu-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.app-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.app-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(13, 22, 17, 0.45);
+  cursor: pointer;
+}
+
+.app-drawer-panel.pl-side {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: min(300px, 86vw);
+  background: var(--paper-2);
+  box-shadow: var(--shadow-2);
+  animation: app-drawer-in 0.35s var(--ease-out);
+}
+
+@keyframes app-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-drawer-panel.pl-side {
+    animation: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .shell,
+  .shell.is-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .shell-side {
+    display: none;
+  }
+
+  .shell-mobilebar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: 58px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--paper) 92%, transparent);
+    backdrop-filter: blur(10px);
+  }
+
+  .shell-mobilebar .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+  }
+}

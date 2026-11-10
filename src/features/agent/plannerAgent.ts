@@ -2,10 +2,10 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 import type { TripBrief } from "@/features/planner/tripBrief";
-import type { ItineraryPlan } from "@/features/planner/travelOffer";
+import type { ItineraryPlan, TravelOffer } from "@/features/planner/travelOffer";
 import { createAgentModel, extractJson, lastMessageText, type AgentMessage } from "./agentRuntime";
 import { plannerSystemPrompt } from "./prompt";
-import { makePlannerTools } from "./tools";
+import { makePlannerTools, type DealInsights } from "./tools";
 
 export const agentOutputSchema = z.object({
   offerIds: z.array(z.string()),
@@ -17,7 +17,13 @@ export type PlannerAgentDeps = {
   llm: ChatOpenAI;
 };
 
-export type ToolName = "search_flights" | "search_hotels" | "search_activities" | "build_itinerary";
+export type ToolName =
+  | "search_flights"
+  | "search_hotels"
+  | "search_activities"
+  | "compare_platforms"
+  | "check_market"
+  | "build_itinerary";
 
 export type PlannerStreamEvent =
   | { kind: "tool-call"; tool: ToolName; label: string }
@@ -30,6 +36,8 @@ const TOOL_LABELS: Record<ToolName, string> = {
   search_flights: "Searching flights…",
   search_hotels: "Searching hotels…",
   search_activities: "Searching activities…",
+  compare_platforms: "Comparing prices across platforms…",
+  check_market: "Checking market fares and nearby dates…",
   build_itinerary: "Checking totals and feasibility…",
 };
 
@@ -53,6 +61,13 @@ function summarizeToolResult(tool: ToolName, content: string): string {
       const total = money.format(plan.totalCostMinorUnits / 100);
       return plan.status === "feasible" ? `${total} total, fits the budget.` : `${total} total, needs changes.`;
     }
+    if (tool === "compare_platforms" && Array.isArray(parsed)) {
+      const platforms = new Set(parsed.flatMap((item: { prices?: { platform: string }[] }) => (item.prices ?? []).map((p) => p.platform)));
+      return `Compared ${parsed.length} item${parsed.length === 1 ? "" : "s"} across ${Math.max(1, platforms.size)} platform${platforms.size === 1 ? "" : "s"}.`;
+    }
+    if (tool === "check_market" && Array.isArray(parsed)) {
+      return parsed.length ? `Checked ${parsed.length} route-day${parsed.length === 1 ? "" : "s"} against market fares.` : "No market fares for these routes.";
+    }
     const count = Array.isArray(parsed) ? parsed.length : 0;
     return count === 0 ? "No offers found." : `Found ${count} offer${count === 1 ? "" : "s"}.`;
   } catch {
@@ -72,10 +87,11 @@ export function parseAgentFinalMessage(text: string): AgentOutput {
  */
 export async function* streamPlannerAgent(
   brief: TripBrief,
-  deps: Partial<PlannerAgentDeps> = {},
+  catalog: readonly TravelOffer[],
+  deps: Partial<PlannerAgentDeps> & { insights?: DealInsights } = {},
 ): AsyncGenerator<PlannerStreamEvent, AgentOutput> {
   const llm = deps.llm ?? createAgentModel();
-  const { tools } = await makePlannerTools(brief);
+  const { tools } = makePlannerTools(brief, catalog, deps.insights);
   const agent = createReactAgent({ llm, tools, prompt: plannerSystemPrompt });
   const stream = await agent.stream(
     { messages: [{ role: "user", content: JSON.stringify(brief) }] },

@@ -1,101 +1,124 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 import { verifyWebhookSignature } from "@/features/payments/paypal";
+import {
+  getQuote,
+  listBookings,
+  markWebhookProcessed,
+  recordWebhookEvent,
+  setQuoteStatus,
+  transitionQuote,
+} from "@/features/quotes/quoteStore";
+import type { PlanQuote } from "@/features/quotes/quote";
 
-vi.mock("@/features/payments/paypal", () => ({
-  verifyWebhookSignature: vi.fn(),
+vi.mock("@/features/payments/paypal", async () => {
+  const actual = await vi.importActual<typeof import("@/features/payments/paypal")>("@/features/payments/paypal");
+  return { ...actual, verifyWebhookSignature: vi.fn() };
+});
+vi.mock("@/features/quotes/quoteStore", () => ({
+  getQuote: vi.fn(),
+  listBookings: vi.fn(),
+  markWebhookProcessed: vi.fn(),
+  recordWebhookEvent: vi.fn(),
+  setQuoteStatus: vi.fn(),
+  transitionQuote: vi.fn(),
 }));
 
-function post(body: unknown): Promise<Response> {
+const QUOTE_ID = "11111111-1111-4111-8111-111111111111";
+
+const signed = {
+  "paypal-transmission-id": "t-1",
+  "paypal-transmission-time": "2026-11-10T00:00:00Z",
+  "paypal-transmission-sig": "sig",
+  "paypal-cert-url": "https://api.sandbox.paypal.com/v1/notifications/certs/CERT",
+  "paypal-auth-algo": "SHA256withRSA",
+};
+
+function quote(status: PlanQuote["status"]): PlanQuote {
+  return { id: QUOTE_ID, userId: null, offers: [], totalMinorUnits: 0, status, paypalOrderId: "o", approveUrl: null, expiresAt: "" };
+}
+
+function deliver(eventType: string, headers: Record<string, string> = signed, id = "WH-1") {
   return POST(
     new Request("http://localhost/api/webhooks/paypal", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "paypal-auth-algo": "SHA256withRSA",
-        "paypal-cert-url": "https://api.sandbox.paypal.com/cert",
-        "paypal-transmission-id": "txn-1",
-        "paypal-transmission-sig": "sig",
-        "paypal-transmission-time": "2026-11-10T00:00:00Z",
-      },
-      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ id, event_type: eventType, resource: { id: "CAP-1", custom_id: QUOTE_ID, status: "COMPLETED" } }),
     }),
   );
 }
 
 beforeEach(() => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
+  process.env.PAYPAL_WEBHOOK_ID = "WH-ID";
+  vi.mocked(verifyWebhookSignature).mockResolvedValue(true);
+  vi.mocked(recordWebhookEvent).mockResolvedValue(true);
+  vi.mocked(markWebhookProcessed).mockResolvedValue();
+  vi.mocked(listBookings).mockResolvedValue([]);
+  vi.mocked(transitionQuote).mockResolvedValue(true);
+  vi.mocked(setQuoteStatus).mockResolvedValue();
 });
 
 afterEach(() => {
-  vi.mocked(verifyWebhookSignature).mockReset();
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  delete process.env.PAYPAL_WEBHOOK_ID;
 });
 
 describe("POST /api/webhooks/paypal", () => {
-  it("rejects a body that isn't valid JSON", async () => {
-    const response = await POST(
-      new Request("http://localhost/api/webhooks/paypal", { method: "POST", body: "not json" }),
-    );
-    expect(response.status).toBe(400);
-    expect(verifyWebhookSignature).not.toHaveBeenCalled();
+  it("refuses deliveries when no webhook id is configured", async () => {
+    delete process.env.PAYPAL_WEBHOOK_ID;
+    expect((await deliver("PAYMENT.CAPTURE.COMPLETED")).status).toBe(503);
   });
 
-  it("rejects a JSON body missing id or event_type", async () => {
-    const response = await post({ resource: {} });
-    expect(response.status).toBe(400);
-    expect(verifyWebhookSignature).not.toHaveBeenCalled();
+  it("rejects a delivery without PayPal's signature headers, or one PayPal says is not genuine", async () => {
+    expect((await deliver("PAYMENT.CAPTURE.COMPLETED", {})).status).toBe(400);
+    vi.mocked(verifyWebhookSignature).mockResolvedValueOnce(false);
+    expect((await deliver("PAYMENT.CAPTURE.COMPLETED")).status).toBe(400);
+    expect(recordWebhookEvent).not.toHaveBeenCalled();
   });
 
-  it("rejects an event with an invalid signature", async () => {
-    vi.mocked(verifyWebhookSignature).mockResolvedValue(false);
-
-    const response = await post({ id: "evt-1", event_type: "PAYMENT.CAPTURE.COMPLETED", resource: {} });
-
-    expect(response.status).toBe(401);
-  });
-
-  it("verifies against the PAYPAL-* transmission headers and logs a known event type", async () => {
-    vi.mocked(verifyWebhookSignature).mockResolvedValue(true);
-
-    const response = await post({
-      id: "evt-1",
-      event_type: "PAYMENT.CAPTURE.COMPLETED",
-      resource: { id: "capture-1", amount: { value: "10.00" } },
-    });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ received: true });
+  it("verifies against the configured webhook id with the event exactly as received", async () => {
+    vi.mocked(getQuote).mockResolvedValue(quote("completed"));
+    await deliver("PAYMENT.CAPTURE.COMPLETED");
     expect(verifyWebhookSignature).toHaveBeenCalledWith(
-      {
-        authAlgo: "SHA256withRSA",
-        certUrl: "https://api.sandbox.paypal.com/cert",
-        transmissionId: "txn-1",
-        transmissionSig: "sig",
-        transmissionTime: "2026-11-10T00:00:00Z",
-      },
-      { id: "evt-1", event_type: "PAYMENT.CAPTURE.COMPLETED", resource: { id: "capture-1", amount: { value: "10.00" } } },
+      expect.objectContaining({ transmissionId: "t-1", authAlgo: "SHA256withRSA" }),
+      expect.objectContaining({ id: "WH-1", event_type: "PAYMENT.CAPTURE.COMPLETED" }),
+      "WH-ID",
     );
-    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toContain("PAYMENT.CAPTURE.COMPLETED");
   });
 
-  it("still returns 200 for an unhandled event type, but notes it was unhandled", async () => {
-    vi.mocked(verifyWebhookSignature).mockResolvedValue(true);
-
-    const response = await post({ id: "evt-2", event_type: "SOME.OTHER.EVENT" });
-
-    expect(response.status).toBe(200);
-    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toContain("unhandled");
+  it("acknowledges a repeat delivery without acting on it again", async () => {
+    vi.mocked(recordWebhookEvent).mockResolvedValueOnce(false);
+    const response = await deliver("PAYMENT.CAPTURE.DENIED");
+    expect(await response.json()).toEqual({ ok: true, duplicate: true });
+    expect(setQuoteStatus).not.toHaveBeenCalled();
   });
 
-  it("does not reprocess a duplicate event id", async () => {
-    vi.mocked(verifyWebhookSignature).mockResolvedValue(true);
+  it("releases a quote held for a PENDING capture once PayPal says it completed", async () => {
+    vi.mocked(getQuote).mockResolvedValue(quote("needs_attention"));
+    const response = await deliver("PAYMENT.CAPTURE.COMPLETED");
+    expect(await response.json()).toEqual({ ok: true, outcome: "released-for-booking" });
+    expect(transitionQuote).toHaveBeenCalledWith(QUOTE_ID, "needs_attention", "ordered");
+    expect(markWebhookProcessed).toHaveBeenCalledWith("WH-1", "released-for-booking", QUOTE_ID);
+  });
 
-    await post({ id: "evt-dup", event_type: "PAYMENT.CAPTURE.REFUNDED" });
-    vi.mocked(console.log).mockClear();
-    const response = await post({ id: "evt-dup", event_type: "PAYMENT.CAPTURE.REFUNDED" });
+  it("leaves a quote with real bookings for a human instead of re-running it", async () => {
+    vi.mocked(getQuote).mockResolvedValue(quote("needs_attention"));
+    vi.mocked(listBookings).mockResolvedValue([
+      { offerId: "f", status: "booked", amountMinorUnits: 1, bookingRef: "r", failureReason: null, refundStatus: null },
+    ]);
+    expect(await (await deliver("PAYMENT.CAPTURE.COMPLETED")).json()).toEqual({ ok: true, outcome: "left-for-review" });
+    expect(transitionQuote).not.toHaveBeenCalled();
+  });
 
-    expect(response.status).toBe(200);
-    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toContain("duplicate");
+  it("flags the quote when money is denied or pulled back", async () => {
+    vi.mocked(getQuote).mockResolvedValue(quote("completed"));
+    expect(await (await deliver("PAYMENT.CAPTURE.REVERSED")).json()).toEqual({ ok: true, outcome: "flagged" });
+    expect(setQuoteStatus).toHaveBeenCalledWith(QUOTE_ID, "needs_attention");
+  });
+
+  it("answers 500 when processing fails, so PayPal redelivers", async () => {
+    vi.mocked(getQuote).mockRejectedValue(new Error("db down"));
+    expect((await deliver("PAYMENT.CAPTURE.COMPLETED")).status).toBe(500);
+    expect(markWebhookProcessed).not.toHaveBeenCalled();
   });
 });

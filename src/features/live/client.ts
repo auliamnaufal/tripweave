@@ -2,7 +2,8 @@
 
 import type { PlanStreamEvent } from "@/app/api/plan/route";
 import type { CaptureStreamEvent } from "@/app/api/payments/capture/route";
-import type { TravelOfferView } from "@/features/planner/travelOffer";
+import type { ItineraryPlanView } from "@/features/planner/travelOffer";
+import type { PlanResult } from "@/features/quotes/planResult";
 import { getDestination, origins, type TripPrefs } from "@/features/ui-mock/destinations";
 
 /** The wire shape `/api/plan` accepts (see `tripBriefSchema`). */
@@ -15,6 +16,8 @@ export type TripBriefWire = {
   hardBudget: { currency: "USD"; amountMinorUnits: number };
   preferences: string[];
   constraints: string[];
+  stops?: { city: string; country: string; nights: number }[];
+  dayPlans?: { day: number; wish: string }[];
 };
 
 const originCountry: Record<string, string> = {
@@ -24,6 +27,20 @@ const originCountry: Record<string, string> = {
   Singapore: "Singapore",
   Jakarta: "Indonesia",
 };
+
+/**
+ * The traveller's home airport ("San Francisco (SFO)", or any "City, Country")
+ * as the place flights start from. Falls back to San Francisco.
+ */
+export function homeOrigin(label?: string | null): { city: string; country: string } {
+  const raw = (label ?? "").replace(/\s*\([A-Z]{3}\)\s*$/, "").trim();
+  const [city, country] = raw.split(/\s*,\s*/);
+  if (city && country) return { city, country };
+  if (city && originCountry[city]) return { city, country: originCountry[city] };
+  // A bare city name: the airport search resolves it; the country only has to be non-empty.
+  if (city) return { city, country: city };
+  return { city: "San Francisco", country: "United States" };
+}
 
 // The airport city Duffel should search for each catalog destination.
 const flightCity: Record<string, { city: string; country: string }> = {
@@ -52,10 +69,14 @@ function dayIso(date: Date, endOfDay = false): string {
 export function briefFromPrefs(prefs: TripPrefs, extraConstraints: string[] = [], today = new Date()): TripBriefWire {
   const start = new Date(today.getTime() + startOffsetDays(prefs.when) * 86_400_000);
   const end = new Date(start.getTime() + prefs.nights * 86_400_000);
-  const origin = origins.find((o) => o.city === prefs.origin) ?? origins[0];
+  // A listed city, or any "City, Country (IATA)" picked from the airport search.
+  const listed = origins.find((o) => o.city === prefs.origin);
+  const typed = homeOrigin(prefs.origin);
+  const origin = listed ?? (prefs.origin && typed.city !== "San Francisco" ? { city: typed.city } : origins[0]);
+  const originPlace = listed ? { city: listed.city, country: originCountry[listed.city] ?? "United States" } : prefs.origin && typed.city !== "San Francisco" ? typed : { city: origin.city, country: originCountry[origin.city] ?? "United States" };
   const dest = flightCity[prefs.destId] ?? { city: getDestination(prefs.destId).name, country: getDestination(prefs.destId).country };
   return {
-    origin: { city: origin.city, country: originCountry[origin.city] ?? "United States" },
+    origin: originPlace,
     destination: dest,
     timeZone: "UTC",
     travelers: prefs.travelers,
@@ -86,8 +107,42 @@ async function* readNdjson<T>(body: ReadableStream<Uint8Array>): AsyncGenerator<
 }
 
 async function errorText(response: Response, fallback: string): Promise<string> {
-  const body: unknown = await response.json().catch(() => null);
-  return (body as { error?: string } | null)?.error ?? fallback;
+  const body = (await response.json().catch(() => null)) as { error?: string; reason?: string | null } | null;
+  // A specific reason ("At most 9 travellers per trip.") beats the generic error.
+  return body?.reason ?? body?.error ?? fallback;
+}
+
+export type IntakeResult =
+  | { kind: "brief"; brief: TripBriefWire; summary: string; stops: { city: string; country: string; nights: number }[]; dayPlans: { day: number; wish: string }[] }
+  | { kind: "clarify"; question: string };
+
+/** Swaps one flight leg or stay for another option from the same search (instant, no new search). */
+export async function swapOption(quoteId: string, fromOfferId: string, toOfferId: string): Promise<PlanResult & { differenceMinorUnits: number }> {
+  const response = await fetch("/api/plan/swap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quoteId, fromOfferId, toOfferId }),
+  });
+  if (!response.ok) throw new Error(await errorText(response, "I couldn’t change that option."));
+  return (await response.json()) as PlanResult & { differenceMinorUnits: number };
+}
+
+/** The intake agent: free text in, a validated brief (or one clarifying question) out. */
+export async function readTrip(
+  text: string,
+  defaults: { origin: { city: string; country: string }; travelers: number; budgetUsd: number },
+): Promise<IntakeResult> {
+  const response = await fetch("/api/intake", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, defaults }),
+  });
+  const body = (await response.json().catch(() => null)) as
+    | { brief?: TripBriefWire; summary?: string; stops?: { city: string; country: string; nights: number }[]; dayPlans?: { day: number; wish: string }[]; clarification?: string; error?: string }
+    | null;
+  if (!response.ok) throw new Error(body?.error ?? "I couldn’t read that request.");
+  if (body?.clarification || !body?.brief) return { kind: "clarify", question: body?.clarification ?? "Where would you like to go?" };
+  return { kind: "brief", brief: body.brief, summary: body.summary ?? "", stops: body.stops ?? [], dayPlans: body.dayPlans ?? [] };
 }
 
 /** Streams `/api/plan`. Each event is handed to `onEvent` as it arrives. */
@@ -103,18 +158,45 @@ export async function streamPlan(brief: TripBriefWire, onEvent: (event: PlanStre
 
 export type OrderResult = { orderId: string; approveUrl: string; amountMinorUnits: number };
 
-export async function createOrder(offers: TravelOfferView[]): Promise<OrderResult> {
+/**
+ * A refused order. `code: "quote-repriced"` carries the re-priced plan and its
+ * new quote id: show the new total, and the traveller pays that quote instead.
+ */
+export class OrderError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+    readonly repriced?: { quoteId: string; plan: ItineraryPlanView; previousTotalMinorUnits: number },
+  ) {
+    super(message);
+  }
+}
+
+/** Pays the server-held quote. The browser never sends prices or offers. */
+export type TravellerName = { firstName: string; lastName: string; email?: string };
+
+export async function createOrder(quoteId: string | undefined, travellers?: TravellerName[]): Promise<OrderResult> {
+  if (!quoteId) throw new OrderError("This plan needs a refresh before it can be paid. Ask the planner to plan it again.");
   const response = await fetch("/api/payments/order", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ offers }),
+    body: JSON.stringify({ quoteId, ...(travellers?.length ? { travellers } : {}) }),
   });
-  if (!response.ok) throw new Error(await errorText(response, "PayPal is unavailable right now."));
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as
+      | { error?: string; code?: string; quoteId?: string; plan?: ItineraryPlanView; previousTotalMinorUnits?: number }
+      | null;
+    const repriced =
+      body?.code === "quote-repriced" && body.quoteId && body.plan
+        ? { quoteId: body.quoteId, plan: body.plan, previousTotalMinorUnits: body.previousTotalMinorUnits ?? 0 }
+        : undefined;
+    throw new OrderError(body?.error ?? "PayPal is unavailable right now.", body?.code, repriced);
+  }
   return (await response.json()) as OrderResult;
 }
 
 export async function streamCapture(
-  input: { orderId: string; offers: TravelOfferView[]; forceFailureOfferId?: string; destId?: string; title?: string },
+  input: { orderId: string; forceFailureOfferId?: string; destId?: string; title?: string },
   onEvent: (event: CaptureStreamEvent) => void,
 ): Promise<void> {
   const response = await fetch("/api/payments/capture", {

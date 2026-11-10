@@ -1,60 +1,68 @@
-import { z } from "zod";
-import { verifyWebhookSignature } from "@/features/payments/paypal";
+import { readWebhookHeaders, verifyWebhookSignature } from "@/features/payments/paypal";
+import { handlePayPalEvent, type PayPalWebhookEvent } from "@/features/payments/webhook";
+import {
+  getQuote,
+  listBookings,
+  markWebhookProcessed,
+  recordWebhookEvent,
+  setQuoteStatus,
+  transitionQuote,
+} from "@/features/quotes/quoteStore";
 
 export const runtime = "nodejs";
 
-const webhookEventSchema = z.object({
-  id: z.string().min(1),
-  event_type: z.string().min(1),
-  resource: z.unknown().optional(),
-});
-
-// The events this flow actually acts on — see ADR for the refund-on-booking-failure
-// flow and the multi-payee split that PAYMENT.CAPTURE.REFUNDED confirms.
-const HANDLED_EVENT_TYPES = new Set(["PAYMENT.CAPTURE.COMPLETED", "PAYMENT.CAPTURE.REFUNDED"]);
-
-// ponytail: in-memory only, so a redeploy or a second instance forgets what it's
-// seen. Add a webhook_events table (event id + received_at) if this needs to
-// survive across instances/restarts.
-const seenEventIds = new Set<string>();
-
+/**
+ * PayPal webhook receiver. Order of operations matters:
+ * 1. Verify with PayPal that the delivery is genuine. Unverified → 400, never processed.
+ * 2. Record it by event id. A repeat delivery → 200 and stop (PayPal retries until 2xx).
+ * 3. Act on it, then mark it processed.
+ * A failure in 1–3 answers 5xx so PayPal redelivers later.
+ */
 export async function POST(request: Request) {
-  let event: z.infer<typeof webhookEventSchema>;
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  if (!webhookId) {
+    console.error("PAYPAL_WEBHOOK_ID is not set; refusing webhook deliveries");
+    return Response.json({ error: "Webhooks are not configured." }, { status: 503 });
+  }
+
+  const headers = readWebhookHeaders(request.headers);
+  let event: PayPalWebhookEvent;
   try {
-    event = webhookEventSchema.parse(JSON.parse(await request.text()));
+    event = (await request.json()) as PayPalWebhookEvent;
   } catch {
-    return Response.json({ error: "Invalid webhook payload." }, { status: 400 });
+    return Response.json({ error: "Invalid body." }, { status: 400 });
+  }
+  if (!headers || typeof event?.id !== "string" || typeof event?.event_type !== "string") {
+    return Response.json({ error: "Not a PayPal webhook." }, { status: 400 });
   }
 
-  const verified = await verifyWebhookSignature(
-    {
-      authAlgo: request.headers.get("paypal-auth-algo") ?? "",
-      certUrl: request.headers.get("paypal-cert-url") ?? "",
-      transmissionId: request.headers.get("paypal-transmission-id") ?? "",
-      transmissionSig: request.headers.get("paypal-transmission-sig") ?? "",
-      transmissionTime: request.headers.get("paypal-transmission-time") ?? "",
-    },
-    event,
-  ).catch(() => false);
-
-  if (!verified) {
-    console.error(`[paypal webhook] rejected event ${event.id} (${event.event_type}) — signature did not verify`);
-    return Response.json({ error: "Invalid webhook signature." }, { status: 401 });
+  let genuine: boolean;
+  try {
+    genuine = await verifyWebhookSignature(headers, event, webhookId);
+  } catch (error) {
+    console.error("webhook verification unavailable", error);
+    return Response.json({ error: "Try again later." }, { status: 503 });
+  }
+  if (!genuine) {
+    console.warn("rejected a webhook that failed PayPal verification", event.id);
+    return Response.json({ error: "Verification failed." }, { status: 400 });
   }
 
-  if (seenEventIds.has(event.id)) {
-    console.log(`[paypal webhook] duplicate event ${event.id} (${event.event_type}) — already processed, skipping`);
-    return Response.json({ received: true });
-  }
-  seenEventIds.add(event.id);
+  try {
+    const first = await recordWebhookEvent({
+      id: event.id,
+      eventType: event.event_type,
+      resourceId: event.resource?.id ?? null,
+      payload: event,
+    });
+    if (!first) return Response.json({ ok: true, duplicate: true });
 
-  if (HANDLED_EVENT_TYPES.has(event.event_type)) {
-    console.log(`[paypal webhook] ${event.event_type} — event ${event.id}`, JSON.stringify(event.resource));
-  } else {
-    console.log(`[paypal webhook] unhandled event type ${event.event_type} — event ${event.id}`);
+    const { outcome, quoteId } = await handlePayPalEvent(event, { getQuote, listBookings, transitionQuote, setQuoteStatus });
+    await markWebhookProcessed(event.id, outcome, quoteId);
+    console.info(`paypal webhook ${event.event_type} ${event.id} -> ${outcome}${quoteId ? ` (quote ${quoteId})` : ""}`);
+    return Response.json({ ok: true, outcome });
+  } catch (error) {
+    console.error("webhook processing failed", event.id, error);
+    return Response.json({ error: "Try again later." }, { status: 500 });
   }
-
-  // Always 200 once verified, so PayPal doesn't retry — even an event type we
-  // don't act on yet was still received and logged.
-  return Response.json({ received: true });
 }

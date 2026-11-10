@@ -1,14 +1,15 @@
-import { parseTripBrief } from "@/features/planner/tripBrief";
-import { buildItinerary, selectOffers } from "@/features/planner/planner";
-import { searchAllOffers } from "@/features/suppliers/duffel";
+import { briefProblem, parseTripBrief } from "@/features/planner/tripBrief";
+import { selectOffers } from "@/features/planner/planner";
+import { CatalogUnavailableError, searchCatalog } from "@/features/suppliers/registry";
 import { streamPlannerAgent, type PlannerStreamEvent } from "@/features/agent/plannerAgent";
-import { itineraryPlanSchema, type ItineraryPlanView } from "@/features/planner/travelOffer";
+import { finalizePlan, type PlanResult } from "@/features/quotes/planResult";
+import { authedUser } from "@/lib/supabase/authedUser";
 
 export const runtime = "nodejs";
 
 export type PlanStreamEvent =
   | PlannerStreamEvent
-  | { kind: "plan"; plan: ItineraryPlanView; note: string; source: string; retrievedAt: string }
+  | ({ kind: "plan" } & PlanResult)
   | { kind: "error"; message: string };
 
 function ndjsonLine(event: PlanStreamEvent): Uint8Array {
@@ -16,39 +17,50 @@ function ndjsonLine(event: PlanStreamEvent): Uint8Array {
 }
 
 export async function POST(request: Request) {
+  let body: unknown;
   let brief;
   try {
-    brief = parseTripBrief(await request.json());
+    body = await request.json();
+    brief = parseTripBrief(body);
   } catch {
-    return Response.json({ error: "The trip brief is invalid." }, { status: 400 });
+    // `reason` is the schema's own human-readable message (e.g. "At most 9
+    // travellers per trip."), so the planner can say what to change.
+    return Response.json({ error: "The trip brief is invalid.", reason: body === undefined ? undefined : briefProblem(body) }, { status: 400 });
   }
+
+  // Read once, outside the stream, since it needs the request's cookies.
+  const { user } = await authedUser();
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const agentSteps = streamPlannerAgent(brief);
+        // One search, shared: the agent picks from this catalog and the plan is
+        // rebuilt from it, so ids and prices can't drift between the two.
+        const { offers: catalog, comparisons, markets, sources } = await searchCatalog(brief);
+
+        const agentSteps = streamPlannerAgent(brief, catalog, { insights: { comparisons, markets } });
         let step = await agentSteps.next();
         while (!step.done) {
           controller.enqueue(ndjsonLine(step.value));
           step = await agentSteps.next();
         }
 
-        const catalog = await searchAllOffers(brief);
-        const plan = buildItinerary(brief, selectOffers(catalog, step.value.offerIds));
-        controller.enqueue(
-          ndjsonLine({
-            kind: "plan",
-            plan: itineraryPlanSchema.parse(plan),
-            note: step.value.note,
-            source: "duffel+synthetic",
-            retrievedAt: new Date().toISOString(),
-          }),
-        );
+        const result = await finalizePlan({
+          userId: user?.id ?? null,
+          brief,
+          selection: selectOffers(catalog, step.value.offerIds),
+          catalog,
+          insights: { comparisons, markets, sources },
+          note: step.value.note,
+        });
+        controller.enqueue(ndjsonLine({ kind: "plan", ...result }));
       } catch (error) {
         console.error("plan generation failed", error);
-        controller.enqueue(
-          ndjsonLine({ kind: "error", message: "The planner is unavailable. Please try again." }),
-        );
+        const message =
+          error instanceof CatalogUnavailableError
+            ? `${error.message} Try other dates or another destination.`
+            : "The planner is unavailable. Please try again.";
+        controller.enqueue(ndjsonLine({ kind: "error", message }));
       } finally {
         controller.close();
       }

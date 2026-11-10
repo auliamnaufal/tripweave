@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { DocumentsPanel } from "@/components/app/TravelDocs";
 import { Icon, type IconName } from "@/components/brand/Icon";
@@ -21,8 +21,11 @@ import {
   useSaved,
   useTripPrefs,
   useUser,
+  userStore,
 } from "@/features/ui-mock/tripStore";
-import { signOut as supabaseSignOut, toggleSaved } from "@/features/db/sync";
+import { AirportPicker } from "@/components/app/AirportPicker";
+import { toggleSaved } from "@/features/db/sync";
+import { useSignOut } from "@/components/app/AccountMenu";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 
 type Tab = "trips" | "saved" | "documents" | "preferences" | "payments" | "settings";
@@ -67,7 +70,6 @@ export function Account() {
 
 function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> }) {
   const root = useRef<HTMLDivElement>(null);
-  const router = useRouter();
   const params = useSearchParams();
   const initial = (params.get("tab") as Tab) ?? "trips";
   const [tab, setTab] = useState<Tab>(tabs.some((t) => t.id === initial) ? initial : "trips");
@@ -80,6 +82,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
   const [picked, setPicked] = useState<string[]>(prefs.vibes.length ? prefs.vibes : ["Slow mornings", "Food first"]);
   const [diet, setDiet] = useState("No restrictions");
   const [seat, setSeat] = useState<"Window" | "Aisle">("Window");
+  const [homeAirport, setHomeAirport] = useState(user?.homeAirport ?? "San Francisco (SFO)");
   const [savedNote, setSavedNote] = useState(false);
   const [toggles, setToggles] = useState({ booking: true, price: true, tips: false, newsletter: true });
 
@@ -125,13 +128,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
     URL.revokeObjectURL(url);
   }
 
-  function signOut() {
-    // Clears every per-person local cache (orders, trip history, saved places,
-    // documents), not just the user record — otherwise the next person on this
-    // browser would still see the signed-out traveller's data.
-    void supabaseSignOut();
-    router.push("/");
-  }
+  // Same sign-out as the account menu: session and every per-person local cache, then home.
+  const { signOut, busy: signingOut } = useSignOut();
 
   return (
     <div ref={root} className="ac-page">
@@ -305,6 +303,8 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
               className="ac-form"
               onSubmit={(e) => {
                 e.preventDefault();
+                // Saved for real: the planner flies from here unless a request names another origin.
+                if (user && homeAirport.trim()) userStore.set({ ...user, homeAirport: homeAirport.trim() });
                 setSavedNote(true);
                 setTimeout(() => setSavedNote(false), 2200);
               }}
@@ -324,13 +324,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
               <div className="ac-row">
                 <label className="ac-input">
                   <span>Home airport</span>
-                  <select defaultValue="SFO">
-                    <option value="SFO">San Francisco (SFO)</option>
-                    <option value="JFK">New York (JFK)</option>
-                    <option value="LHR">London (LHR)</option>
-                    <option value="SIN">Singapore (SIN)</option>
-                    <option value="CGK">Jakarta (CGK)</option>
-                  </select>
+                  <AirportPicker name="home-airport" value={homeAirport} onChange={setHomeAirport} />
                 </label>
                 <label className="ac-input">
                   <span>Usual budget per trip</span>
@@ -468,7 +462,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                 </label>
               </div>
               <div className="ac-actions">
-                <button type="button" className="btn btn-ghost" onClick={signOut}>
+                <button type="button" className="btn btn-ghost" onClick={() => void signOut()} disabled={signingOut}>
                   Sign out
                 </button>
               </div>

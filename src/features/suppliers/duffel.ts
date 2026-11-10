@@ -1,14 +1,23 @@
 import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
-import { searchActivities, searchHotels } from "./synthetic";
-
-export { searchActivities, searchHotels };
+import { tripLegs } from "@/features/planner/itinerary";
+import type { RepriceResult, SupplierAdapter } from "./adapter";
+import { simulateBooking } from "./booking";
 
 function apiKey(): string {
   const key = process.env.DUFFEL_API_KEY;
   if (!key) throw new Error("Duffel is not configured.");
   return key;
+}
+
+class DuffelHttpError extends Error {
+  constructor(
+    readonly path: string,
+    readonly status: number | undefined,
+  ) {
+    super(`Duffel request to ${path} failed${status ? ` (${status})` : ""}.`);
+  }
 }
 
 async function duffelFetch(path: string, init: RequestInit = {}): Promise<unknown> {
@@ -21,13 +30,15 @@ async function duffelFetch(path: string, init: RequestInit = {}): Promise<unknow
       ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
-  if (!response.ok) throw new Error(`Duffel request to ${path} failed.`);
+  if (!response.ok) throw new DuffelHttpError(path, response.status);
   return response.json();
 }
 
-type Place = { iata_code?: string; time_zone?: string };
+type Place = { iata_code?: string; time_zone?: string; iata_country_code?: string };
 
-async function resolvePlace(query: string): Promise<{ iata_code: string; time_zone: string }> {
+export type ResolvedPlace = { iata_code: string; time_zone: string; country_code?: string };
+
+async function resolvePlace(query: string): Promise<ResolvedPlace> {
   const qs = new URLSearchParams({ query }).toString();
   const body = (await duffelFetch(`/places/suggestions?${qs}`)) as { data?: Place[] };
   // Duffel's suggestions mix city and airport entries; only some carry
@@ -37,12 +48,26 @@ async function resolvePlace(query: string): Promise<{ iata_code: string; time_zo
   if (!place?.iata_code || !place.time_zone) {
     throw new Error(`No place match with a known timezone for "${query}".`);
   }
-  return { iata_code: place.iata_code, time_zone: place.time_zone };
+  return {
+    iata_code: place.iata_code,
+    time_zone: place.time_zone,
+    ...(place.iata_country_code ? { country_code: place.iata_country_code } : {}),
+  };
 }
 
-function dateOnly(value: string): string {
-  return value.slice(0, 10);
+const placeCache = new Map<string, Promise<ResolvedPlace>>();
+
+/** Airport code, time zone and country for a city, shared by every supplier that needs them. */
+export function resolveAirport(city: string): Promise<ResolvedPlace> {
+  const key = city.trim().toLowerCase();
+  const hit = placeCache.get(key);
+  if (hit) return hit;
+  const promise = resolvePlace(city);
+  promise.catch(() => placeCache.delete(key));
+  placeCache.set(key, promise);
+  return promise;
 }
+
 
 function stamp(): { retrievedAt: string; expiresAt: string } {
   const retrievedAt = new Date().toISOString();
@@ -96,21 +121,65 @@ type DuffelOffer = {
   id: string;
   total_amount: string;
   total_currency: string;
+  /** Duffel's own deadline for this price. Usually 15–30 minutes out. */
+  expires_at?: string;
   owner?: { name?: string };
   slices: {
-    segments: { departing_at: string; arriving_at: string }[];
+    segments: DuffelSegment[];
   }[];
 };
+
+type DuffelSegment = {
+  departing_at: string;
+  arriving_at: string;
+  marketing_carrier?: { iata_code?: string };
+  marketing_carrier_flight_number?: string;
+};
+
+/** The cheapest offer, then the rest picked evenly by departure time. */
+function spreadByDeparture(offers: DuffelOffer[], count: number): DuffelOffer[] {
+  const cheapest = offers[0];
+  const byTime = [...offers].sort((a, b) => (a.slices[0]?.segments[0]?.departing_at ?? "").localeCompare(b.slices[0]?.segments[0]?.departing_at ?? ""));
+  const picked = new Set<DuffelOffer>([cheapest]);
+  for (let i = 0; picked.size < count && i < count * 2; i++) {
+    picked.add(byTime[Math.min(byTime.length - 1, Math.floor((i * byTime.length) / Math.max(1, count - 1)))]);
+  }
+  for (const offer of byTime) if (picked.size < count) picked.add(offer);
+  return offers.filter((offer) => picked.has(offer));
+}
+
+/** The route and travel day, for comparing different flights in the same market. */
+export function flightMarketKey(from: string, to: string, localDeparture: string): string {
+  return `flight-market:${from}-${to}@${localDeparture.slice(0, 10)}`;
+}
+
+/**
+ * The same flights on any platform: every segment's marketing carrier and
+ * flight number, plus the first departure in local time. Any source that
+ * reports those fields produces the same key, so their prices can be compared.
+ */
+export function flightProductKey(segments: readonly DuffelSegment[]): string | undefined {
+  if (segments.length === 0) return undefined;
+  const parts: string[] = [];
+  for (const segment of segments) {
+    const carrier = segment.marketing_carrier?.iata_code;
+    const number = segment.marketing_carrier_flight_number;
+    if (!carrier || !number) return undefined;
+    parts.push(`${carrier}${number}`);
+  }
+  return `flight:${parts.join("+")}@${segments[0].departing_at.slice(0, 16)}`;
+}
 
 async function searchFlightLeg(
   from: string,
   to: string,
   departureDate: string,
   adults: number,
-  legLabel: "outbound" | "return",
+  legLabel: string,
   departureZone: string,
   arrivalZone: string,
   stamped: { retrievedAt: string; expiresAt: string },
+  maxOffers = 3,
 ): Promise<TravelOffer[]> {
   const body = (await duffelFetch("/air/offer_requests?return_offers=true", {
     method: "POST",
@@ -126,12 +195,16 @@ async function searchFlightLeg(
   if (offers.length === 0) return [];
   const rate = await usdRate(offers[0].total_currency);
 
-  return offers.slice(0, 3).flatMap((offer, index) => {
+  // Spread the kept offers across the day, not just the cheapest few: a
+  // connecting leg has to leave after the previous one lands.
+  const kept = maxOffers >= offers.length ? offers : spreadByDeparture(offers, maxOffers);
+  return kept.flatMap((offer, index) => {
     const segments = offer.slices[0]?.segments ?? [];
     if (segments.length === 0) return [];
     const first = segments[0];
     const last = segments[segments.length - 1];
     const stops = segments.length - 1;
+    const productKey = flightProductKey(segments);
     return [
       {
         id: `flight-${legLabel}-${index}`,
@@ -145,46 +218,86 @@ async function searchFlightLeg(
         costMinorUnits: minorUnits(Math.round(parseFloat(offer.total_amount) * rate * 100)),
         currency: "USD" as const,
         retrievedAt: stamped.retrievedAt,
-        expiresAt: stamped.expiresAt,
+        expiresAt: earlierOf(stamped.expiresAt, offer.expires_at),
         cancellationTerms: "Subject to fare rules at booking; not confirmed by this search.",
         synthetic: false,
+        ...(productKey ? { productKey } : {}),
+        marketKey: flightMarketKey(from, to, first.departing_at),
       },
     ];
   });
 }
 
+/**
+ * One offer request per leg of the trip (see tripLegs): out and back for a
+ * single city, plus one between each pair of stops for a multi-city trip.
+ */
 export async function searchFlights(brief: TripBrief): Promise<TravelOffer[]> {
-  const [origin, destination] = await Promise.all([
-    resolvePlace(brief.origin.city),
-    resolvePlace(brief.destination.city),
-  ]);
+  const legs = tripLegs(brief);
+  const cities = [...new Set(legs.flatMap((leg) => [leg.from.city, leg.to.city]))];
+  const places = new Map(await Promise.all(cities.map(async (city) => [city, await resolvePlace(city)] as const)));
   const stamped = stamp();
-  const [outbound, inbound] = await Promise.all([
-    searchFlightLeg(
-      origin.iata_code,
-      destination.iata_code,
-      dateOnly(brief.travelWindow.startsAt),
-      brief.travelers,
-      "outbound",
-      origin.time_zone,
-      destination.time_zone,
-      stamped,
-    ),
-    searchFlightLeg(
-      destination.iata_code,
-      origin.iata_code,
-      dateOnly(brief.travelWindow.endsAt),
-      brief.travelers,
-      "return",
-      destination.time_zone,
-      origin.time_zone,
-      stamped,
-    ),
-  ]);
-  return [...outbound, ...inbound];
+  const perLeg = await Promise.all(
+    legs.map((leg) => {
+      const from = places.get(leg.from.city)!;
+      const to = places.get(leg.to.city)!;
+      // Multi-city trips get more options per leg so connections can line up.
+      const maxOffers = legs.length > 2 ? 6 : 3;
+      return searchFlightLeg(from.iata_code, to.iata_code, leg.date, brief.travelers, leg.label, from.time_zone, to.time_zone, stamped, maxOffers);
+    }),
+  );
+  return perLeg.flat();
 }
 
-export async function searchAllOffers(brief: TripBrief): Promise<TravelOffer[]> {
-  const flights = await searchFlights(brief);
-  return [...flights, ...searchHotels(brief), ...searchActivities(brief)];
+function earlierOf(ours: string, theirs: string | undefined): string {
+  if (!theirs || Number.isNaN(Date.parse(theirs))) return ours;
+  return new Date(Math.min(Date.parse(ours), Date.parse(theirs))).toISOString();
 }
+
+function duffelOfferId(offer: TravelOffer): string {
+  const id = offer.supplierRef.startsWith("duffel:") ? offer.supplierRef.slice("duffel:".length) : "";
+  if (!id) throw new Error(`Offer ${offer.id} is not a Duffel offer.`);
+  return id;
+}
+
+/**
+ * Fetches the offer again from Duffel. Duffel answers 404 once an offer has
+ * expired or been superseded, and the price can move between search and pay.
+ */
+export async function repriceFlight(offer: TravelOffer): Promise<RepriceResult> {
+  let body: { data?: DuffelOffer };
+  try {
+    body = (await duffelFetch(`/air/offers/${encodeURIComponent(duffelOfferId(offer))}`)) as { data?: DuffelOffer };
+  } catch (error) {
+    if (error instanceof DuffelHttpError && (error.status === 404 || error.status === 410 || error.status === 422)) {
+      return { status: "unavailable", reason: "This fare is no longer available." };
+    }
+    throw error;
+  }
+  const fresh = body.data;
+  if (!fresh) return { status: "unavailable", reason: "This fare is no longer available." };
+  if (fresh.expires_at && Date.parse(fresh.expires_at) <= Date.now()) {
+    return { status: "unavailable", reason: "This fare has expired." };
+  }
+
+  const rate = await usdRate(fresh.total_currency);
+  const costMinorUnits = minorUnits(Math.round(parseFloat(fresh.total_amount) * rate * 100));
+  const { retrievedAt, expiresAt } = stamp();
+  const updated: TravelOffer = { ...offer, costMinorUnits, retrievedAt, expiresAt: earlierOf(expiresAt, fresh.expires_at) };
+  return costMinorUnits === offer.costMinorUnits
+    ? { status: "unchanged", offer: updated }
+    : { status: "changed", offer: updated, previousMinorUnits: offer.costMinorUnits };
+}
+
+export const duffelAdapter: SupplierAdapter = {
+  name: "duffel",
+  kinds: ["flight"],
+  capability: "bookable",
+  isConfigured: () => Boolean(process.env.DUFFEL_API_KEY),
+  search: (brief) => searchFlights(brief),
+  reprice: repriceFlight,
+  // ponytail: still simulated. A real ticket is POST /air/orders with type
+  // "instant", a "balance" payment and real passenger details (Phase E/F in
+  // docs/backend-integration-guide.md). The idempotency key is ready for it.
+  book: async (offer, context) => simulateBooking(offer, context.forceFail === true),
+};

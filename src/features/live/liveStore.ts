@@ -2,7 +2,10 @@
 
 import { useSyncExternalStore } from "react";
 import type { ItineraryPlanView } from "@/features/planner/travelOffer";
-import type { TripPrefs } from "@/features/ui-mock/destinations";
+import type { ProductComparison } from "@/features/suppliers/compare";
+import type { DealSummary } from "@/features/suppliers/deal";
+import type { AlternativeSlot } from "@/features/suppliers/alternatives";
+import { registerCustomDestination, type CustomPlace, type TripPrefs } from "@/features/ui-mock/destinations";
 import type { OrderResult, TripBriefWire } from "./client";
 
 // The last real plan the agent returned, and the PayPal order for it. Kept in
@@ -15,6 +18,16 @@ export type LivePlan = {
   note: string;
   source: string;
   retrievedAt: string;
+  /** Server-held priced snapshot; checkout pays this, never the offers above. */
+  quoteId?: string;
+  /** Same products priced on other platforms (see suppliers/compare.ts). */
+  comparisons?: ProductComparison[];
+  /** What the deal hunt found for this plan (platforms, savings, tips), computed by the server. */
+  deal?: DealSummary;
+  /** Set for a trip outside the catalog (free-text request): how the screens name and show it. */
+  place?: CustomPlace;
+  /** Other options per flight leg and stay from the same search, for instant swaps. */
+  alternatives?: AlternativeSlot[];
 };
 
 export type LivePayment = OrderResult & { planRetrievedAt: string };
@@ -64,7 +77,22 @@ function store<T>(key: string) {
   return { get, set: write, use };
 }
 
-export const livePlanStore = store<LivePlan>("tw-live-plan");
+const planStore = store<LivePlan>("tw-live-plan");
+
+/** A stored plan for a custom place re-registers that place, so screens can show it after a reload. */
+export const livePlanStore = {
+  ...planStore,
+  get: (): LivePlan | null => {
+    const plan = planStore.get();
+    if (plan?.place) registerCustomDestination(plan.place);
+    return plan;
+  },
+  use: (): LivePlan | null => {
+    const plan = planStore.use();
+    if (plan?.place) registerCustomDestination(plan.place);
+    return plan;
+  },
+};
 export const livePaymentStore = store<LivePayment>("tw-live-payment");
 export const useLivePlan = livePlanStore.use;
 export const useLivePayment = livePaymentStore.use;

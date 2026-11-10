@@ -5,6 +5,7 @@ import type { TravelOffer } from "@/features/planner/travelOffer";
 import { createAgentModel, extractJson, lastMessageText, type AgentMessage } from "./agentRuntime";
 import { bookingSystemPrompt } from "./prompt";
 import { makeBookingTools } from "./tools";
+import type { BookingStreamEvent, BookingToolName } from "@/features/suppliers/bookingExecutor";
 
 export const bookingResultSchema = z.discriminatedUnion("status", [
   z.object({ offerId: z.string(), status: z.literal("booked"), bookingRef: z.string() }),
@@ -16,12 +17,10 @@ export const bookingAgentOutputSchema = z.object({
 });
 export type BookingAgentOutput = z.infer<typeof bookingAgentOutputSchema>;
 
-export type BookingToolName = "book_flight" | "book_hotel" | "book_activity";
-
-export type BookingStreamEvent =
-  | { kind: "tool-call"; tool: BookingToolName; label: string }
-  | { kind: "tool-result"; tool: BookingToolName; summary: string }
-  | { kind: "note"; text: string };
+// Event types are shared with the deterministic executor that capture uses
+// today. This agent is kept for when booking becomes conversational; it books
+// through the same supplier registry.
+export type { BookingStreamEvent, BookingToolName };
 
 export type BookingAgentDeps = { llm: ChatOpenAI };
 
