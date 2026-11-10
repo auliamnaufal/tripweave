@@ -33,9 +33,11 @@ async function duffelFetch(path: string, init: RequestInit = {}): Promise<unknow
   return response.json();
 }
 
-type Place = { iata_code?: string; time_zone?: string };
+type Place = { iata_code?: string; time_zone?: string; iata_country_code?: string };
 
-async function resolvePlace(query: string): Promise<{ iata_code: string; time_zone: string }> {
+export type ResolvedPlace = { iata_code: string; time_zone: string; country_code?: string };
+
+async function resolvePlace(query: string): Promise<ResolvedPlace> {
   const qs = new URLSearchParams({ query }).toString();
   const body = (await duffelFetch(`/places/suggestions?${qs}`)) as { data?: Place[] };
   // Duffel's suggestions mix city and airport entries; only some carry
@@ -45,7 +47,24 @@ async function resolvePlace(query: string): Promise<{ iata_code: string; time_zo
   if (!place?.iata_code || !place.time_zone) {
     throw new Error(`No place match with a known timezone for "${query}".`);
   }
-  return { iata_code: place.iata_code, time_zone: place.time_zone };
+  return {
+    iata_code: place.iata_code,
+    time_zone: place.time_zone,
+    ...(place.iata_country_code ? { country_code: place.iata_country_code } : {}),
+  };
+}
+
+const placeCache = new Map<string, Promise<ResolvedPlace>>();
+
+/** Airport code, time zone and country for a city, shared by every supplier that needs them. */
+export function resolveAirport(city: string): Promise<ResolvedPlace> {
+  const key = city.trim().toLowerCase();
+  const hit = placeCache.get(key);
+  if (hit) return hit;
+  const promise = resolvePlace(city);
+  promise.catch(() => placeCache.delete(key));
+  placeCache.set(key, promise);
+  return promise;
 }
 
 function dateOnly(value: string): string {
@@ -119,6 +138,11 @@ type DuffelSegment = {
   marketing_carrier_flight_number?: string;
 };
 
+/** The route and travel day, for comparing different flights in the same market. */
+export function flightMarketKey(from: string, to: string, localDeparture: string): string {
+  return `flight-market:${from}-${to}@${localDeparture.slice(0, 10)}`;
+}
+
 /**
  * The same flights on any platform: every segment's marketing carrier and
  * flight number, plus the first departure in local time. Any source that
@@ -184,6 +208,7 @@ async function searchFlightLeg(
         cancellationTerms: "Subject to fare rules at booking; not confirmed by this search.",
         synthetic: false,
         ...(productKey ? { productKey } : {}),
+        marketKey: flightMarketKey(from, to, first.departing_at),
       },
     ];
   });

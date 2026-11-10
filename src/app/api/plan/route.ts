@@ -2,6 +2,7 @@ import { briefProblem, parseTripBrief } from "@/features/planner/tripBrief";
 import { buildItinerary, selectOffers } from "@/features/planner/planner";
 import { CatalogUnavailableError, searchCatalog, type SourceReport } from "@/features/suppliers/registry";
 import { comparisonsFor, type ProductComparison } from "@/features/suppliers/compare";
+import { summarizeDeal, type DealSummary } from "@/features/suppliers/deal";
 import { streamPlannerAgent, type PlannerStreamEvent } from "@/features/agent/plannerAgent";
 import { itineraryPlanSchema, type ItineraryPlanView } from "@/features/planner/travelOffer";
 import { saveQuote } from "@/features/quotes/quoteStore";
@@ -20,6 +21,8 @@ export type PlanStreamEvent =
       sources: SourceReport[];
       /** For the plan's own products: every platform's price, cheapest first. */
       comparisons: ProductComparison[];
+      /** What the deal hunt found, computed by code (not the model): platforms, savings, date tips. */
+      deal: DealSummary;
       retrievedAt: string;
       // The server-held priced snapshot of this plan. Checkout pays this id,
       // never the offers the browser holds. Absent only if it could not be saved,
@@ -52,9 +55,9 @@ export async function POST(request: Request) {
       try {
         // One search, shared: the agent picks from this catalog and the plan is
         // rebuilt from it, so ids and prices can't drift between the two.
-        const { offers: catalog, comparisons, sources } = await searchCatalog(brief);
+        const { offers: catalog, comparisons, markets, sources } = await searchCatalog(brief);
 
-        const agentSteps = streamPlannerAgent(brief, catalog);
+        const agentSteps = streamPlannerAgent(brief, catalog, { insights: { comparisons, markets } });
         let step = await agentSteps.next();
         while (!step.done) {
           controller.enqueue(ndjsonLine(step.value));
@@ -78,6 +81,7 @@ export async function POST(request: Request) {
             source: [...new Set(plan.offers.map((offer) => offer.supplier))].join("+"),
             sources,
             comparisons: comparisonsFor(plan.offers, comparisons),
+            deal: summarizeDeal(plan.offers, comparisons, markets, sources),
             retrievedAt: new Date().toISOString(),
             ...(quoteId ? { quoteId } : {}),
           }),

@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import type { ItineraryPlanView } from "@/features/planner/travelOffer";
 import type { ProductComparison } from "@/features/suppliers/compare";
+import type { DealSummary } from "@/features/suppliers/deal";
 import type { TripPrefs } from "@/features/ui-mock/destinations";
 import type { OrderResult, TripBriefWire } from "./client";
 
@@ -20,6 +21,8 @@ export type LivePlan = {
   quoteId?: string;
   /** Same products priced on other platforms (see suppliers/compare.ts). */
   comparisons?: ProductComparison[];
+  /** What the deal hunt found for this plan (platforms, savings, tips), computed by the server. */
+  deal?: DealSummary;
 };
 
 export type LivePayment = OrderResult & { planRetrievedAt: string };

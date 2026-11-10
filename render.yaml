@@ -35,6 +35,13 @@ services:
       # https://<APP_BASE_URL>/api/webhooks/paypal.
       - key: PAYPAL_WEBHOOK_ID
         sync: false
+      # Partner platforms. Each is skipped while its key is empty.
+      - key: LITEAPI_KEY
+        sync: false
+      - key: TRAVELPAYOUTS_TOKEN
+        sync: false
+      - key: TRAVELPAYOUTS_MARKER
+        sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY

@@ -28,6 +28,12 @@ export type TravelOffer = {
    * it are compared on price. Offers without one are never merged.
    */
   productKey?: string;
+  /**
+   * The market this offer competes in, e.g. `flight-market:SFO-LIS@2026-12-20`:
+   * different products a traveller could swap for each other. Used to compare
+   * against metasearch fares that can't be matched to the exact flight.
+   */
+  marketKey?: string;
   /** The supplier's own public page for this offer (a deeplink offer's only way to buy it). */
   listingUrl?: string;
 };
@@ -77,6 +83,7 @@ export const travelOfferSchema = z
     synthetic: z.boolean(),
     supplierPayeeEmail: z.string().email().optional(),
     productKey: z.string().min(1).max(200).optional(),
+    marketKey: z.string().min(1).max(200).optional(),
     listingUrl: z.string().url().refine((url) => url.startsWith("https://"), "Listing links must be https.").optional(),
   })
   // A flight is never a legitimate Onboarded Supplier (GLOSSARY.md): airline

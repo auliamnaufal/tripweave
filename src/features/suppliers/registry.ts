@@ -2,9 +2,37 @@ import type { TripBrief } from "@/features/planner/tripBrief";
 import { toTravelOffer, travelOfferSchema, type TravelOffer } from "@/features/planner/travelOffer";
 import type { ProductKind, RepriceResult, SupplierAdapter } from "./adapter";
 import type { BookingResult } from "./booking";
-import { compareOffers, type ProductComparison } from "./compare";
+import { compareOffers, marketBenchmarks, type MarketBenchmark, type ProductComparison } from "./compare";
 import { duffelAdapter } from "./duffel";
+import { liteApiAdapter } from "./liteapi";
+import { memoizeSearch } from "./memo";
+import { createPartnerAdapter, PARTNER_PROFILES } from "./partners";
 import { syntheticAdapter } from "./synthetic";
+import { travelpayoutsAdapter } from "./travelpayouts";
+
+// One instance of each source for the process, so the memoized search is
+// shared between a source and every partner that resells its inventory.
+const duffel = memoizeSearch(duffelAdapter);
+const liteapi = memoizeSearch(liteApiAdapter);
+const synthetic = memoizeSearch(syntheticAdapter);
+
+/** Real hotel inventory when LiteAPI is configured, sample stays otherwise. */
+const hotelSource = (): SupplierAdapter => (liteapi.isConfigured() ? liteapi : synthetic);
+const hotelBase: SupplierAdapter = {
+  get name() {
+    return hotelSource().name;
+  },
+  kinds: ["hotel"],
+  capability: "bookable",
+  isConfigured: () => hotelSource().isConfigured(),
+  search: (brief, kind) => hotelSource().search(brief, kind),
+  reprice: (offer) => hotelSource().reprice(offer),
+  book: (offer, context) => hotelSource().book(offer, context),
+};
+
+const partners = PARTNER_PROFILES.map((profile) =>
+  createPartnerAdapter(profile, { flight: duffel, hotel: hotelBase, activity: synthetic }),
+);
 
 /**
  * Which adapters serve each product kind. `primary` adapters are searched in
@@ -15,15 +43,22 @@ import { syntheticAdapter } from "./synthetic";
 export type KindRoute = { primary: SupplierAdapter[]; fallback: SupplierAdapter[]; required: boolean };
 export type RegistryConfig = { routes: Record<ProductKind, KindRoute>; timeoutMs: number };
 
+/**
+ * Every platform Tripweave searches, per kind:
+ * - flights: Duffel (real fares) + simulated OTA partners reselling them +
+ *   Aviasales via Travelpayouts (real market fares, price check only).
+ *   Never a silent swap to sample flights.
+ * - hotels: LiteAPI (real, sandbox-bookable) + partners; sample stays only
+ *   as a fallback, or as the source when LiteAPI isn't configured.
+ * - activities: local operators (sample catalog) + partners.
+ */
 export function defaultRegistryConfig(): RegistryConfig {
+  const realHotels = liteapi.isConfigured();
   return {
     routes: {
-      // Real fares only. No silent swap to sample flights.
-      flight: { primary: [duffelAdapter], fallback: [], required: true },
-      // No self-serve real hotel/activity API yet (#8, #11, #12): add it to
-      // `primary` and keep synthetic as `fallback` once one is approved.
-      hotel: { primary: [syntheticAdapter], fallback: [], required: false },
-      activity: { primary: [syntheticAdapter], fallback: [], required: false },
+      flight: { primary: [duffel, ...partners, travelpayoutsAdapter], fallback: [], required: true },
+      hotel: { primary: [realHotels ? liteapi : synthetic, ...partners], fallback: realHotels ? [synthetic] : [], required: false },
+      activity: { primary: [synthetic, ...partners], fallback: [], required: false },
     },
     timeoutMs: 25_000,
   };
@@ -45,6 +80,8 @@ export type CatalogResult = {
   offers: TravelOffer[];
   /** The same product priced on two or more platforms, including deeplink-only ones. */
   comparisons: ProductComparison[];
+  /** Per flight market (route + day): best bookable fare vs. metasearch fares that day and nearby. */
+  markets: MarketBenchmark[];
   sources: SourceReport[];
 };
 
@@ -157,14 +194,18 @@ export async function searchCatalog(brief: TripBrief, config: RegistryConfig = d
   const seen = new Set<string>();
   const offers: TravelOffer[] = [];
   const comparisons: ProductComparison[] = [];
+  const markets: MarketBenchmark[] = [];
   perKind.forEach((result, index) => {
     const kind = kinds[index];
-    const compared = compareOffers(uniqueIds(result.bookable, seen), uniqueIds(result.deeplink, seen));
+    const bookable = uniqueIds(result.bookable, seen);
+    const deeplink = uniqueIds(result.deeplink, seen);
+    const compared = compareOffers(bookable, deeplink);
     if (compared.catalog.length === 0 && config.routes[kind].required) throw new CatalogUnavailableError(kind);
     offers.push(...compared.catalog);
     comparisons.push(...compared.comparisons);
+    markets.push(...marketBenchmarks(bookable, deeplink));
   });
-  return { offers, comparisons, sources: perKind.flatMap((result) => result.sources) };
+  return { offers, comparisons, markets, sources: perKind.flatMap((result) => result.sources) };
 }
 
 function allAdapters(config: RegistryConfig): SupplierAdapter[] {

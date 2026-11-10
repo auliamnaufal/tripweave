@@ -38,6 +38,7 @@ import {
   type TravelDoc,
 } from "@/features/ui-mock/documents";
 import { DocChecklist, useDocPicker } from "@/components/app/TravelDocs";
+import { DealLine } from "@/components/app/DealPanel";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
 import { briefFromPrefs, streamPlan, type TripBriefWire } from "@/features/live/client";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
@@ -265,7 +266,7 @@ export function Planner() {
           });
           setStage((s) => Math.max(s, liveStage[event.tool] ?? s));
         } else if (event.kind === "plan") {
-          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt, quoteId: event.quoteId, comparisons: event.comparisons };
+          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt, quoteId: event.quoteId, comparisons: event.comparisons, deal: event.deal };
         } else if (event.kind === "error") {
           out.failure = event.message;
         }
@@ -1498,6 +1499,7 @@ function AgentBlock({
           <div className={`budget-bar ${plan.underBy < 0 ? "is-over" : ""}`}>
             <i style={{ width: `${Math.min(100, (plan.totals.total / plan.prefs.budget) * 100)}%` }} />
           </div>
+          {lv?.deal && <DealLine deal={lv.deal} />}
           <div className="pl-plan-actions">
             <Link href="/trip" className="btn btn-sm">
               Open itinerary

@@ -1,6 +1,23 @@
 # Tripweave
 
-Tripweave plans a holiday within a budget and lets the traveller pay for all of it with **one PayPal approval**. An AI agent picks flights, a stay and activities from offers that real suppliers priced. Deterministic code, not the model, owns every price, total and booking.
+Tripweave is a deal-hunting travel agent with one checkout. It searches every platform Tripweave partners with at once (airlines, hotel networks, OTAs, local operators), finds the best deal for each part of the trip, and wraps it all into **one PayPal approval**. Tripweave is the gateway: the traveller pays once, and Tripweave pays and books each platform behind the scenes.
+
+Partnerships, not scraping: Tripweave only reaches platforms through their own partner or affiliate APIs. A platform it hasn't partnered with is never crawled or driven by a bot.
+
+**What's real in this proof of concept, and what's simulated**
+
+| | |
+|---|---|
+| Real | Duffel airline fares (test mode) and repricing · LiteAPI hotel rates, prebook and **sandbox bookings** · Aviasales market fares via **Travelpayouts** (the demo's live partner integration, with affiliate links) · PayPal sandbox order, capture, refunds and webhooks · the agent's tool calls |
+| Simulated | OTA partners **Nusantara Trips** and **SkyBazaar**, standing in for B2B partners such as Traveloka Partners Network or tiket.com B2B. They resell the same real Duffel and LiteAPI inventory at their own prices and terms, so the comparison is product-for-product. Their bookings and airline ticketing return `SIM-…` references |
+
+Deterministic code, not the model, owns every price, total and booking.
+
+### The deal hunt
+
+1. `searchCatalog` queries every platform in parallel and keeps each product at its cheapest bookable platform.
+2. The agent searches, calls `compare_platforms` (what each platform charges for the exact products it's considering, with terms), calls `check_market` (Aviasales fares on the same route and the cheapest day within a week), then `build_itinerary` until the selection fits.
+3. The server computes the deal summary from the search itself, not from the model: platforms searched, offers compared, what each item saved against the priciest platform, and date tips. `/trip` shows it in the "Deal hunt" panel, with simulated partners labelled.
 
 ## How it works
 
@@ -38,10 +55,15 @@ Every supplier is a `SupplierAdapter` (`src/features/suppliers/adapter.ts`) with
 - **bookable**: Tripweave can reprice and book it, so it may be paid through PayPal; or
 - **deeplink**: price information only (affiliate or metasearch). Shown as "cheaper on X" with its link, never charged.
 
-| Supplier | Kind | Type | Status |
+| Platform | Kind | Type | Status |
 |---|---|---|---|
-| Duffel | flights | bookable | Real search and reprice (test mode). Ticketing still simulated |
-| Synthetic catalog | hotels, activities | bookable | Sample data for 7 destinations, until a real API is connected |
+| Duffel | flights | bookable | Real search and reprice (test mode). Ticketing simulated |
+| LiteAPI | hotels | bookable | Real rates; reprice via prebook; real sandbox booking (`clientReference` = idempotency key) |
+| Aviasales (Travelpayouts) | flights | deeplink | Real cached market fares with affiliate links; benchmark and date tips |
+| Nusantara Trips, SkyBazaar | flights, hotels, activities | bookable | Simulated OTA partners over the real inventory above |
+| Local operators | activities (and fallback stays) | bookable | Sample catalog for 7 destinations |
+
+All Duffel, LiteAPI and sample searches are memoized per brief, so a source is called once per plan however many partners resell it.
 
 Adding one: write `src/features/suppliers/<name>.ts`, add a `contract(...)` line with recorded fixtures in `adapter.contract.test.ts`, register it in `defaultRegistryConfig()`. Nothing else changes. See `docs/backend-integration-guide.md`.
 

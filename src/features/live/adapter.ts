@@ -1,4 +1,5 @@
 import type { TravelOfferView } from "@/features/planner/travelOffer";
+import type { DealSummary } from "@/features/suppliers/deal";
 import { getDestination, type DayItem, type Plan } from "@/features/ui-mock/destinations";
 import { planView, type PlanView } from "@/features/ui-mock/planView";
 import type { LivePlan } from "./liveStore";
@@ -14,6 +15,7 @@ export type LiveView = PlanView & {
   status: "feasible" | "infeasible";
   source: string;
   quoteId?: string;
+  deal?: DealSummary;
 };
 
 const usdFromMinor = (minor: number) => Math.round(minor / 100);
@@ -128,6 +130,7 @@ export function liveView(live: LivePlan): LiveView {
     status: live.plan.status,
     source: live.source,
     quoteId: live.quoteId,
+    deal: live.deal,
     total: usdFromMinor(live.plan.totalCostMinorUnits),
     title: `${nights} nights in ${dest.name}`,
     dates: `${fmt(start)} – ${fmt(end)}`,

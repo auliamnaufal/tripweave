@@ -57,6 +57,9 @@ function makeOffer(
     expiresAt,
     cancellationTerms: "Fully refundable within 24 hours (synthetic).",
     synthetic: true,
+    // Stays and activities can be resold by partners and compared; sample
+    // flights never are (real flights come from Duffel).
+    ...(productKind === "flight" ? {} : { productKey: `${productKind}:synthetic-${id}@${iso(startsAtMs).slice(0, 10)}` }),
   };
 }
 
