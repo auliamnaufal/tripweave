@@ -2166,41 +2166,13 @@
   margin: clamp(40px, 6vw, 80px) 0 10px;
   overflow: hidden;
   color: var(--on-dark);
-  font-size: clamp(80px, 22.5vw, 440px);
+  font-size: clamp(60px, 20.4vw, 400px); /* Geist runs ~4.57em wide for "Tripweave"; this keeps it inside the viewport */
   line-height: 0.8;
   letter-spacing: -0.04em;
 }
 .footer-word span {
   display: inline-block;
   padding-bottom: 0.06em;
-}
-.footer-disclaimer {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.6fr) 3fr;
-  gap: 24px;
-  padding-top: 22px;
-  padding-bottom: 26px;
-  border-top: 1px solid var(--on-dark-line);
-}
-.footer-disclaimer h3 {
-  color: var(--on-dark-soft);
-  font-size: 12px;
-  font-weight: 400;
-}
-.footer-notes {
-  columns: 2 280px;
-  column-gap: 32px;
-  color: var(--on-dark-soft);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-.footer-notes p {
-  margin-bottom: 12px;
-  break-inside: avoid;
-}
-.footer-notes b {
-  color: var(--on-dark);
-  font-weight: 500;
 }
 .footer-legal nav {
   display: flex;
@@ -2213,12 +2185,6 @@
 }
 .footer-legal a:hover {
   color: var(--on-dark);
-}
-@media (max-width: 700px) {
-  .footer-disclaimer {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
 }
 .footer-legal {
   display: flex;

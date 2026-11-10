@@ -7,29 +7,6 @@ import { Icon } from "@/components/brand/Icon";
 import { LogoMark } from "@/components/brand/Logo";
 import { gsap, SplitText, useGSAP } from "@/lib/gsap";
 
-const footerNotes = [
-  {
-    title: "Prototype",
-    body: "Tripweave is a demo. Flights, stays, prices and availability shown are samples, not offers to sell. Final prices are confirmed by each supplier at booking.",
-  },
-  {
-    title: "AI planning",
-    body: "Plans are drafted by an AI agent and can contain mistakes. Check times, prices and rules before you pay. Budget totals are calculated by code, not the model.",
-  },
-  {
-    title: "Travel documents",
-    body: "Passport, visa and entry checklists are general guidance, not legal or immigration advice. Rules depend on your nationality and change often, so confirm them with your destination’s official government source. You are responsible for holding valid documents.",
-  },
-  {
-    title: "Your data",
-    body: "Documents you upload are used only to make your bookings and go only to the suppliers that need them, after you approve payment. They are never sold or used to train AI models, and you can delete them any time.",
-  },
-  {
-    title: "Payments",
-    body: "Payments are processed by PayPal. Tripweave is the merchant of record, and each supplier’s own terms, such as fare rules and cancellation policies, also apply.",
-  },
-];
-
 export function Closing() {
   const root = useRef<HTMLElement>(null);
   const router = useRouter();
@@ -156,20 +133,8 @@ export function Closing() {
             <span key={i}>{c}</span>
           ))}
         </p>
-        <section className="wrap footer-disclaimer" aria-labelledby="footer-disclaimer-title">
-          <h3 id="footer-disclaimer-title" className="mono">
-            Important information
-          </h3>
-          <div className="footer-notes">
-            {footerNotes.map((n) => (
-              <p key={n.title}>
-                <b>{n.title}.</b> {n.body}
-              </p>
-            ))}
-          </div>
-        </section>
         <div className="wrap footer-legal">
-          <span>© 2026 Tripweave. All rights reserved.</span>
+          <span>© 2026 Tripweave · A prototype with sample prices</span>
           <nav aria-label="Legal">
             <Link href="/legal#terms">Terms</Link>
             <Link href="/legal#privacy">Privacy</Link>
