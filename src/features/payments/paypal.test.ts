@@ -82,75 +82,101 @@ function captureResponse(
   };
 }
 
+const item = (name: string, value: string, sku: string) => ({ name: `Stay: ${name}`, quantity: "1", unit_amount: { currency_code: "USD", value }, sku });
+
 describe("createPlanOrder", () => {
-  it("sums offers with no supplier payee into one bundle purchase unit with no payee", async () => {
+  it("follows the current Orders v2 guide: experience_context under payment_source.paypal, no deprecated application_context", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
       .mockResolvedValueOnce(
         jsonResponse({
           id: "order-1",
-          links: [{ rel: "approve", href: "https://sandbox/approve/order-1" }],
+          status: "PAYER_ACTION_REQUIRED",
+          links: [
+            { rel: "self", href: "https://api.sandbox/v2/checkout/orders/order-1" },
+            { rel: "payer-action", href: "https://sandbox.paypal.com/checkoutnow?token=order-1" },
+          ],
         }),
       );
 
-    const result = await createPlanOrder([offer("flight-1", 62000), offer("hotel-main", 95000)]);
-
-    expect(result).toEqual({ id: "order-1", approveUrl: "https://sandbox/approve/order-1" });
-    const createBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string);
-    expect(createBody.purchase_units).toEqual([
-      { reference_id: "tripweave-bundle", amount: { currency_code: "USD", value: "1570.00" } },
-    ]);
-    // Without this, PayPal's hosted page gets stuck in a "Continue to review
-    // order" loop with nowhere to redirect back to — see the comment in paypal.ts.
-    expect(createBody.application_context).toEqual({
-      shipping_preference: "NO_SHIPPING",
-      user_action: "PAY_NOW",
+    const result = await createPlanOrder([offer("flight-1", 62000), offer("hotel-main", 95000)], {
+      requestId: "tw-order-q",
+      customId: "q",
+      returnUrls: { returnUrl: "http://localhost:3000/checkout/return", cancelUrl: "http://localhost:3000/checkout/return?cancelled=1" },
     });
+
+    expect(result).toEqual({ id: "order-1", approveUrl: "https://sandbox.paypal.com/checkoutnow?token=order-1", status: "PAYER_ACTION_REQUIRED" });
+    const init = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBe("tw-order-q");
+    const createBody = JSON.parse(init.body as string);
+    expect(createBody.intent).toBe("CAPTURE");
+    expect(createBody.application_context).toBeUndefined();
+    expect(createBody.payment_source).toEqual({
+      paypal: {
+        experience_context: {
+          brand_name: "Tripweave",
+          user_action: "PAY_NOW",
+          shipping_preference: "NO_SHIPPING",
+          return_url: "http://localhost:3000/checkout/return",
+          cancel_url: "http://localhost:3000/checkout/return?cancelled=1",
+        },
+      },
+    });
+    expect(createBody.purchase_units).toEqual([
+      {
+        reference_id: "tripweave-bundle",
+        description: "Tripweave trip: flights, stay and activities",
+        amount: { currency_code: "USD", value: "1570.00", breakdown: { item_total: { currency_code: "USD", value: "1570.00" } } },
+        items: [item("flight-1", "620.00", "flight-1"), item("hotel-main", "950.00", "hotel-main")],
+        custom_id: "q",
+      },
+    ]);
+  });
+
+  it("still accepts a legacy approve link", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "order-1", status: "CREATED", links: [{ rel: "approve", href: "https://sandbox/approve/order-1" }] }));
+    expect((await createPlanOrder([offer("hotel-main", 95000)])).approveUrl).toBe("https://sandbox/approve/order-1");
+  });
+
+  it("leaves free items out of the line items so PayPal's totals still match", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "o", status: "PAYER_ACTION_REQUIRED", links: [{ rel: "payer-action", href: "x" }] }));
+    await createPlanOrder([offer("hotel-main", 95000), offer("beach", 0)]);
+    const unit = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string).purchase_units[0];
+    expect(unit.items).toHaveLength(1);
+    expect(unit.amount.breakdown.item_total.value).toBe(unit.amount.value);
   });
 
   it("gives an Onboarded Supplier's offer its own purchase unit and payee, matching the live Capstone test shape", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          id: "order-2",
-          links: [{ rel: "approve", href: "https://sandbox/approve/order-2" }],
-        }),
-      );
+      .mockResolvedValueOnce(jsonResponse({ id: "order-2", status: "PAYER_ACTION_REQUIRED", links: [{ rel: "payer-action", href: "x" }] }));
 
     await createPlanOrder([
       offer("flight-sim", 600),
       offer("hotel-real", 400, "sb-r2jl753813374@personal.example.com"),
     ]);
 
-    const createBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string);
-    expect(createBody.purchase_units).toEqual([
-      { reference_id: "tripweave-bundle", amount: { currency_code: "USD", value: "6.00" } },
-      {
-        reference_id: "hotel-real",
-        amount: { currency_code: "USD", value: "4.00" },
-        payee: { email_address: "sb-r2jl753813374@personal.example.com" },
-      },
+    const units = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string).purchase_units;
+    expect(units.map((u: { reference_id: string; amount: { value: string }; payee?: unknown }) => [u.reference_id, u.amount.value, u.payee])).toEqual([
+      ["tripweave-bundle", "6.00", undefined],
+      ["hotel-real", "4.00", { email_address: "sb-r2jl753813374@personal.example.com" }],
     ]);
   });
 
   it("omits the bundle unit entirely when every offer has its own payee", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
-      .mockResolvedValueOnce(
-        jsonResponse({ id: "order-3", links: [{ rel: "approve", href: "https://sandbox/approve/order-3" }] }),
-      );
+      .mockResolvedValueOnce(jsonResponse({ id: "order-3", status: "PAYER_ACTION_REQUIRED", links: [{ rel: "payer-action", href: "x" }] }));
 
     await createPlanOrder([offer("hotel-real", 400, "sb-r2jl753813374@personal.example.com")]);
 
-    const createBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string);
-    expect(createBody.purchase_units).toEqual([
-      {
-        reference_id: "hotel-real",
-        amount: { currency_code: "USD", value: "4.00" },
-        payee: { email_address: "sb-r2jl753813374@personal.example.com" },
-      },
-    ]);
+    const units = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string).purchase_units;
+    expect(units).toHaveLength(1);
+    expect(units[0]).toMatchObject({ reference_id: "hotel-real", payee: { email_address: "sb-r2jl753813374@personal.example.com" } });
   });
 });
 
@@ -187,6 +213,17 @@ describe("capturePlanOrder", () => {
         },
       ],
     });
+  });
+
+  it("does not try to capture an order the buyer has not approved yet", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse(orderDetail("CREATED", [{ referenceId: "tripweave-bundle", amountValue: "1570.00" }])));
+
+    const result = await capturePlanOrder("order-1");
+
+    expect(result.status).toBe("CREATED");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not re-capture an already completed order", async () => {
@@ -278,5 +315,22 @@ describe("refundCapture", () => {
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url).toBe("https://api-m.sandbox.paypal.com/v2/payments/captures/capture-1/refund");
     expect(JSON.parse(init.body as string)).toEqual({ amount: { currency_code: "USD", value: "95.00" } });
+  });
+});
+
+describe("capturePlanOrder declines", () => {
+  it("reports INSTRUMENT_DECLINED as a recoverable status instead of throwing", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse(orderDetail("APPROVED", [{ referenceId: "tripweave-bundle", amountValue: "10.00" }])))
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(jsonResponse({ name: "UNPROCESSABLE_ENTITY", details: [{ issue: "INSTRUMENT_DECLINED" }], debug_id: "abc" }, false));
+
+    const result = await capturePlanOrder("order-1", { requestId: "tw-capture-q" });
+
+    expect(result.status).toBe("INSTRUMENT_DECLINED");
+    const init = fetchMock.mock.calls[3]?.[1] as RequestInit;
+    expect(init.body).toBe("{}");
+    expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBe("tw-capture-q");
   });
 });

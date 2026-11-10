@@ -1,14 +1,22 @@
 import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
-import { searchActivities, searchHotels } from "./synthetic";
-
-export { searchActivities, searchHotels };
+import type { RepriceResult, SupplierAdapter } from "./adapter";
+import { simulateBooking } from "./booking";
 
 function apiKey(): string {
   const key = process.env.DUFFEL_API_KEY;
   if (!key) throw new Error("Duffel is not configured.");
   return key;
+}
+
+class DuffelHttpError extends Error {
+  constructor(
+    readonly path: string,
+    readonly status: number | undefined,
+  ) {
+    super(`Duffel request to ${path} failed${status ? ` (${status})` : ""}.`);
+  }
 }
 
 async function duffelFetch(path: string, init: RequestInit = {}): Promise<unknown> {
@@ -21,7 +29,7 @@ async function duffelFetch(path: string, init: RequestInit = {}): Promise<unknow
       ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
-  if (!response.ok) throw new Error(`Duffel request to ${path} failed.`);
+  if (!response.ok) throw new DuffelHttpError(path, response.status);
   return response.json();
 }
 
@@ -96,11 +104,37 @@ type DuffelOffer = {
   id: string;
   total_amount: string;
   total_currency: string;
+  /** Duffel's own deadline for this price. Usually 15–30 minutes out. */
+  expires_at?: string;
   owner?: { name?: string };
   slices: {
-    segments: { departing_at: string; arriving_at: string }[];
+    segments: DuffelSegment[];
   }[];
 };
+
+type DuffelSegment = {
+  departing_at: string;
+  arriving_at: string;
+  marketing_carrier?: { iata_code?: string };
+  marketing_carrier_flight_number?: string;
+};
+
+/**
+ * The same flights on any platform: every segment's marketing carrier and
+ * flight number, plus the first departure in local time. Any source that
+ * reports those fields produces the same key, so their prices can be compared.
+ */
+export function flightProductKey(segments: readonly DuffelSegment[]): string | undefined {
+  if (segments.length === 0) return undefined;
+  const parts: string[] = [];
+  for (const segment of segments) {
+    const carrier = segment.marketing_carrier?.iata_code;
+    const number = segment.marketing_carrier_flight_number;
+    if (!carrier || !number) return undefined;
+    parts.push(`${carrier}${number}`);
+  }
+  return `flight:${parts.join("+")}@${segments[0].departing_at.slice(0, 16)}`;
+}
 
 async function searchFlightLeg(
   from: string,
@@ -132,6 +166,7 @@ async function searchFlightLeg(
     const first = segments[0];
     const last = segments[segments.length - 1];
     const stops = segments.length - 1;
+    const productKey = flightProductKey(segments);
     return [
       {
         id: `flight-${legLabel}-${index}`,
@@ -145,9 +180,10 @@ async function searchFlightLeg(
         costMinorUnits: minorUnits(Math.round(parseFloat(offer.total_amount) * rate * 100)),
         currency: "USD" as const,
         retrievedAt: stamped.retrievedAt,
-        expiresAt: stamped.expiresAt,
+        expiresAt: earlierOf(stamped.expiresAt, offer.expires_at),
         cancellationTerms: "Subject to fare rules at booking; not confirmed by this search.",
         synthetic: false,
+        ...(productKey ? { productKey } : {}),
       },
     ];
   });
@@ -184,7 +220,55 @@ export async function searchFlights(brief: TripBrief): Promise<TravelOffer[]> {
   return [...outbound, ...inbound];
 }
 
-export async function searchAllOffers(brief: TripBrief): Promise<TravelOffer[]> {
-  const flights = await searchFlights(brief);
-  return [...flights, ...searchHotels(brief), ...searchActivities(brief)];
+function earlierOf(ours: string, theirs: string | undefined): string {
+  if (!theirs || Number.isNaN(Date.parse(theirs))) return ours;
+  return new Date(Math.min(Date.parse(ours), Date.parse(theirs))).toISOString();
 }
+
+function duffelOfferId(offer: TravelOffer): string {
+  const id = offer.supplierRef.startsWith("duffel:") ? offer.supplierRef.slice("duffel:".length) : "";
+  if (!id) throw new Error(`Offer ${offer.id} is not a Duffel offer.`);
+  return id;
+}
+
+/**
+ * Fetches the offer again from Duffel. Duffel answers 404 once an offer has
+ * expired or been superseded, and the price can move between search and pay.
+ */
+export async function repriceFlight(offer: TravelOffer): Promise<RepriceResult> {
+  let body: { data?: DuffelOffer };
+  try {
+    body = (await duffelFetch(`/air/offers/${encodeURIComponent(duffelOfferId(offer))}`)) as { data?: DuffelOffer };
+  } catch (error) {
+    if (error instanceof DuffelHttpError && (error.status === 404 || error.status === 410 || error.status === 422)) {
+      return { status: "unavailable", reason: "This fare is no longer available." };
+    }
+    throw error;
+  }
+  const fresh = body.data;
+  if (!fresh) return { status: "unavailable", reason: "This fare is no longer available." };
+  if (fresh.expires_at && Date.parse(fresh.expires_at) <= Date.now()) {
+    return { status: "unavailable", reason: "This fare has expired." };
+  }
+
+  const rate = await usdRate(fresh.total_currency);
+  const costMinorUnits = minorUnits(Math.round(parseFloat(fresh.total_amount) * rate * 100));
+  const { retrievedAt, expiresAt } = stamp();
+  const updated: TravelOffer = { ...offer, costMinorUnits, retrievedAt, expiresAt: earlierOf(expiresAt, fresh.expires_at) };
+  return costMinorUnits === offer.costMinorUnits
+    ? { status: "unchanged", offer: updated }
+    : { status: "changed", offer: updated, previousMinorUnits: offer.costMinorUnits };
+}
+
+export const duffelAdapter: SupplierAdapter = {
+  name: "duffel",
+  kinds: ["flight"],
+  capability: "bookable",
+  isConfigured: () => Boolean(process.env.DUFFEL_API_KEY),
+  search: (brief) => searchFlights(brief),
+  reprice: repriceFlight,
+  // ponytail: still simulated. A real ticket is POST /air/orders with type
+  // "instant", a "balance" payment and real passenger details (Phase E/F in
+  // docs/backend-integration-guide.md). The idempotency key is ready for it.
+  book: async (offer, context) => simulateBooking(offer, context.forceFail === true),
+};

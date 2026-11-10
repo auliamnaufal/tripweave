@@ -13,6 +13,7 @@ export type LiveView = PlanView & {
   note: string;
   status: "feasible" | "infeasible";
   source: string;
+  quoteId?: string;
 };
 
 const usdFromMinor = (minor: number) => Math.round(minor / 100);
@@ -126,6 +127,7 @@ export function liveView(live: LivePlan): LiveView {
     note: live.note,
     status: live.plan.status,
     source: live.source,
+    quoteId: live.quoteId,
     total: usdFromMinor(live.plan.totalCostMinorUnits),
     title: `${nights} nights in ${dest.name}`,
     dates: `${fmt(start)} – ${fmt(end)}`,

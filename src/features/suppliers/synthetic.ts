@@ -2,6 +2,8 @@ import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 import { findDestination, type Destination } from "@/features/ui-mock/destinations";
+import type { SupplierAdapter } from "./adapter";
+import { simulateBooking } from "./booking";
 
 // ponytail: the destination catalog still lives with the UI placeholder data.
 // Hotels and activities for the 7 catalog destinations come from there so the
@@ -265,3 +267,24 @@ export function searchAllOffers(brief: TripBrief, now?: () => Date): TravelOffer
     ...searchActivities(brief, now),
   ];
 }
+
+const syntheticSearch = { flight: searchFlights, hotel: searchHotels, activity: searchActivities } as const;
+
+/**
+ * Sample data for every kind. The registry uses it as the only hotel and
+ * activity source until a real API is approved, and never for flights unless
+ * configured as a fallback. Prices never move, so reprice only refreshes the stamp.
+ */
+export function createSyntheticAdapter(now: () => Date = () => new Date()): SupplierAdapter {
+  return {
+    name: "synthetic",
+    kinds: ["flight", "hotel", "activity"],
+    capability: "bookable",
+    isConfigured: () => true,
+    search: async (brief, kind) => syntheticSearch[kind](brief, now),
+    reprice: async (offer) => ({ status: "unchanged", offer: { ...offer, ...stamp(now) } }),
+    book: async (offer, context) => simulateBooking(offer, context.forceFail === true),
+  };
+}
+
+export const syntheticAdapter = createSyntheticAdapter();

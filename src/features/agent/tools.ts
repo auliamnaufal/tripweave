@@ -3,14 +3,17 @@ import { z } from "zod";
 import { buildItinerary, selectOffers } from "@/features/planner/planner";
 import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
-import { searchActivities, searchFlights, searchHotels } from "@/features/suppliers/duffel";
-import { simulateBooking } from "@/features/suppliers/booking";
+import { bookOffer as registryBook } from "@/features/suppliers/registry";
 
-export async function makePlannerTools(brief: TripBrief) {
-  const flights = await searchFlights(brief);
-  const hotels = searchHotels(brief);
-  const activities = searchActivities(brief);
-  const catalog = [...flights, ...hotels, ...activities];
+/**
+ * The planner's tools read from one catalog the caller already searched
+ * (`searchCatalog`). The agent never triggers a supplier call itself, and the
+ * server rebuilds the final plan from this same catalog.
+ */
+export function makePlannerTools(brief: TripBrief, catalog: readonly TravelOffer[]) {
+  const flights = catalog.filter((offer) => offer.productKind === "flight");
+  const hotels = catalog.filter((offer) => offer.productKind === "hotel");
+  const activities = catalog.filter((offer) => offer.productKind === "activity");
 
   const searchFlightsTool = tool(
     async () => JSON.stringify(flights),
@@ -61,10 +64,10 @@ export async function makePlannerTools(brief: TripBrief) {
  * paid for during planning; these tools only execute it, scoped so an id of
  * the wrong kind can't be booked under the wrong label.
  */
-export function makeBookingTools(offers: readonly TravelOffer[], forceFailureOfferId?: string) {
+export function makeBookingTools(offers: readonly TravelOffer[], forceFailureOfferId?: string, keyPrefix = "agent") {
   const byId = new Map(offers.map((offer) => [offer.id, offer]));
 
-  function bookOffer(offerId: string, expectedKind: TravelOffer["productKind"]): string {
+  async function bookOffer(offerId: string, expectedKind: TravelOffer["productKind"]): Promise<string> {
     const offer = byId.get(offerId);
     if (!offer) return JSON.stringify({ offerId, status: "failed", reason: "Unknown offer id." });
     if (offer.productKind !== expectedKind) {
@@ -74,7 +77,13 @@ export function makeBookingTools(offers: readonly TravelOffer[], forceFailureOff
         reason: `Expected a ${expectedKind}, got a ${offer.productKind}.`,
       });
     }
-    return JSON.stringify(simulateBooking(offer, offerId === forceFailureOfferId));
+    try {
+      return JSON.stringify(
+        await registryBook(offer, { idempotencyKey: `${keyPrefix}:${offer.id}`, forceFail: offerId === forceFailureOfferId }),
+      );
+    } catch {
+      return JSON.stringify({ offerId, status: "failed", reason: "The supplier could not confirm this booking." });
+    }
   }
 
   const bookFlightTool = tool(

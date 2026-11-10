@@ -99,14 +99,14 @@ export default function Home() {
   const [directPayeeEmail, setDirectPayeeEmail] = useState("");
   const [directPayments, setDirectPayments] = useState<DirectPaymentEvent[]>([]);
 
-  // Demo-only: no supplier registry exists, so the Onboarded Supplier case is
-  // exercised by hand — pick one offer and give it a PayPal email.
-  function offersWithDirectPayee(offers: readonly TravelOfferView[]): TravelOfferView[] {
+  const [quoteId, setQuoteId] = useState<string | null>(null);
+
+  // Demo-only (server needs DEMO_MODE=true): no supplier registry exists, so the
+  // Onboarded Supplier case is exercised by hand — pick one offer and give it a
+  // PayPal email. The server applies it to its own stored quote.
+  function demoDirectPayee(): { offerId: string; email: string } | undefined {
     const email = directPayeeEmail.trim();
-    if (!directPayeeOfferId || !email) return [...offers];
-    return offers.map((offer) =>
-      offer.id === directPayeeOfferId ? { ...offer, supplierPayeeEmail: email } : offer,
-    );
+    return directPayeeOfferId && email ? { offerId: directPayeeOfferId, email } : undefined;
   }
 
   function addPreference(tag: string) {
@@ -137,6 +137,7 @@ export default function Home() {
     setStatus("");
     setProcess([]);
     setPlan(null);
+    setQuoteId(null);
     setNote("");
     setPayment(null);
     setPaymentStatus("");
@@ -175,6 +176,7 @@ export default function Home() {
             continue;
           }
           setPlan(parsed.data);
+          setQuoteId(event.quoteId ?? null);
           setNote(event.note);
         }
       }
@@ -191,11 +193,15 @@ export default function Home() {
     setPayment(null);
     setBookingProcess([]);
     setBookingSummary(null);
+    if (!quoteId) {
+      setPaymentStatus("This plan was not saved on the server, so it can't be paid. Plan the trip again.");
+      return;
+    }
     try {
       const response = await fetch("/api/payments/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offers: offersWithDirectPayee(plan.offers) }),
+        body: JSON.stringify({ quoteId, demoDirectPayee: demoDirectPayee() }),
       });
       const result: unknown = await response.json();
       if (!response.ok) {
@@ -218,14 +224,12 @@ export default function Home() {
     setDirectPayments([]);
     setBooking(true);
     try {
-      const offers = offersWithDirectPayee(plan.offers);
       const response = await fetch("/api/payments/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId: payment.orderId,
-          offers,
-          forceFailureOfferId: simulateFailure ? pickDemoFailureOfferId(offers) : undefined,
+          forceFailureOfferId: simulateFailure ? pickDemoFailureOfferId(plan.offers) : undefined,
         }),
       });
       if (!response.ok || !response.body) {

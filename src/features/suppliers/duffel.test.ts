@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { searchFlights } from "./duffel";
+import { flightProductKey, repriceFlight, searchFlights } from "./duffel";
 import type { TripBrief } from "@/features/planner/tripBrief";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 
@@ -138,5 +138,70 @@ describe("searchFlights", () => {
     );
 
     await expect(searchFlights(brief)).rejects.toThrow('No place match with a known timezone for "Honolulu".');
+  });
+});
+
+describe("repriceFlight", () => {
+  const searched = {
+    id: "flight-outbound-0",
+    supplier: "duffel",
+    supplierRef: "duffel:off_1",
+    productKind: "flight" as const,
+    title: "SFO to HNL, direct",
+    summary: "",
+    startsAt: zonedDateTime("2026-07-10T08:00:00+00:00"),
+    endsAt: zonedDateTime("2026-07-10T11:00:00+00:00"),
+    costMinorUnits: minorUnits(31000),
+    currency: "USD" as const,
+    retrievedAt: "2026-07-01T00:00:00Z",
+    expiresAt: "2026-07-01T00:15:00Z",
+    cancellationTerms: null,
+    synthetic: false,
+  };
+
+  function stubOffer(response: { ok: boolean; status: number; body?: unknown }) {
+    const fetchMock = vi.fn<(url: string) => Promise<unknown>>(async () => ({ ok: response.ok, status: response.status, json: async () => response.body }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("re-reads the offer by its Duffel id and reports an unchanged price", async () => {
+    const fetchMock = stubOffer({ ok: true, status: 200, body: { data: { id: "off_1", total_amount: "310.00", total_currency: "USD", slices: [] } } });
+    const result = await repriceFlight(searched);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.duffel.com/air/offers/off_1");
+    expect(result.status).toBe("unchanged");
+  });
+
+  it("reports a moved price with the old one", async () => {
+    stubOffer({ ok: true, status: 200, body: { data: { id: "off_1", total_amount: "335.50", total_currency: "USD", slices: [] } } });
+    const result = await repriceFlight(searched);
+    expect(result).toMatchObject({ status: "changed", previousMinorUnits: 31000, offer: { costMinorUnits: 33550 } });
+  });
+
+  it("treats a 404 or an expired offer as unavailable, not as an error", async () => {
+    stubOffer({ ok: false, status: 404 });
+    expect((await repriceFlight(searched)).status).toBe("unavailable");
+    stubOffer({ ok: true, status: 200, body: { data: { id: "off_1", total_amount: "310.00", total_currency: "USD", expires_at: "2020-01-01T00:00:00Z", slices: [] } } });
+    expect((await repriceFlight(searched)).status).toBe("unavailable");
+  });
+
+  it("surfaces a Duffel outage as an error instead of guessing", async () => {
+    stubOffer({ ok: false, status: 503 });
+    await expect(repriceFlight(searched)).rejects.toThrow("(503)");
+  });
+});
+
+describe("flightProductKey", () => {
+  it("identifies the same flights on any platform by carrier, flight number and local departure", () => {
+    expect(
+      flightProductKey([
+        { departing_at: "2026-12-10T06:58:00", arriving_at: "2026-12-10T15:00:00", marketing_carrier: { iata_code: "AA" }, marketing_carrier_flight_number: "123" },
+        { departing_at: "2026-12-10T17:00:00", arriving_at: "2026-12-11T03:42:00", marketing_carrier: { iata_code: "IB" }, marketing_carrier_flight_number: "4" },
+      ]),
+    ).toBe("flight:AA123+IB4@2026-12-10T06:58");
+  });
+
+  it("gives no key when any segment's flight number is unknown, so nothing is merged by guess", () => {
+    expect(flightProductKey([{ departing_at: "2026-12-10T06:58:00", arriving_at: "2026-12-10T15:00:00" }])).toBeUndefined();
   });
 });

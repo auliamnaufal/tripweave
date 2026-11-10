@@ -265,7 +265,7 @@ export function Planner() {
           });
           setStage((s) => Math.max(s, liveStage[event.tool] ?? s));
         } else if (event.kind === "plan") {
-          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt };
+          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt, quoteId: event.quoteId, comparisons: event.comparisons };
         } else if (event.kind === "error") {
           out.failure = event.message;
         }

@@ -2,7 +2,7 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 import type { TripBrief } from "@/features/planner/tripBrief";
-import type { ItineraryPlan } from "@/features/planner/travelOffer";
+import type { ItineraryPlan, TravelOffer } from "@/features/planner/travelOffer";
 import { createAgentModel, extractJson, lastMessageText, type AgentMessage } from "./agentRuntime";
 import { plannerSystemPrompt } from "./prompt";
 import { makePlannerTools } from "./tools";
@@ -72,10 +72,11 @@ export function parseAgentFinalMessage(text: string): AgentOutput {
  */
 export async function* streamPlannerAgent(
   brief: TripBrief,
+  catalog: readonly TravelOffer[],
   deps: Partial<PlannerAgentDeps> = {},
 ): AsyncGenerator<PlannerStreamEvent, AgentOutput> {
   const llm = deps.llm ?? createAgentModel();
-  const { tools } = await makePlannerTools(brief);
+  const { tools } = makePlannerTools(brief, catalog);
   const agent = createReactAgent({ llm, tools, prompt: plannerSystemPrompt });
   const stream = await agent.stream(
     { messages: [{ role: "user", content: JSON.stringify(brief) }] },

@@ -1,0 +1,47 @@
+# Render Blueprint: one Node web service running the Next.js app.
+# In Render: New → Blueprint → pick this repo. Every `sync: false` value is
+# asked for once in the dashboard and never stored in this file.
+services:
+  - type: web
+    name: tripweave
+    runtime: node
+    plan: free
+    region: singapore
+    branch: master
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Public URL of this service, e.g. https://tripweave.onrender.com.
+      # PayPal's return_url / cancel_url are built from it.
+      - key: APP_BASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-luna
+      - key: DUFFEL_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_MODE
+        value: sandbox
+      # From PayPal Developer Dashboard → your app → Webhooks, after adding
+      # https://<APP_BASE_URL>/api/webhooks/paypal.
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      # true only for the demo: forces the first activity to fail so the
+      # refund shows. Keep false for anything judges use as a real flow.
+      - key: DEMO_MODE
+        value: "false"

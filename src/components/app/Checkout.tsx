@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
-import { createOrder } from "@/features/live/client";
-import { livePaymentStore } from "@/features/live/liveStore";
+import { createOrder, OrderError } from "@/features/live/client";
+import { livePaymentStore, livePlanStore } from "@/features/live/liveStore";
+import { isPayPalReturnMessage } from "@/features/live/paypalReturn";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
 import { useDocs, useHydrated, useTripPrefs, useUser } from "@/features/ui-mock/tripStore";
 import { blockers, docMeta } from "@/features/ui-mock/documents";
@@ -51,6 +52,20 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [pay.phase]);
+
+  // PayPal redirects its window to /checkout/return (our return_url/cancel_url),
+  // which posts the outcome here. Approval only unlocks capture; /booked then
+  // captures server-side and checks the real status with PayPal.
+  useEffect(() => {
+    if (pay.phase !== "approve") return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || !isPayPalReturnMessage(event.data)) return;
+      if (event.data.cancelled) setPay({ phase: "error", message: "You cancelled on PayPal. Nothing was charged." });
+      else router.push("/booked");
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [pay.phase, router]);
 
   function closeModal() {
     setPay({ phase: "idle" });
@@ -97,12 +112,20 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
     const popup = window.open("", "paypal-approve", "width=520,height=720");
     setPay({ phase: "creating" });
     try {
-      const order = await createOrder(view.offers);
+      const order = await createOrder(view.quoteId);
       livePaymentStore.set({ ...order, planRetrievedAt: view.offers[0]?.retrievedAt ?? "" });
       if (popup) popup.location.href = order.approveUrl;
       setPay({ phase: "approve", approveUrl: order.approveUrl });
     } catch (e) {
       popup?.close();
+      if (e instanceof OrderError && e.repriced) {
+        // Swap in the re-priced plan: the page now shows the new total, and the
+        // next "Pay" charges the new quote — never the old price, never silently.
+        const current = livePlanStore.get();
+        if (current) livePlanStore.set({ ...current, plan: e.repriced.plan, quoteId: e.repriced.quoteId });
+        setPay({ phase: "error", message: `${e.message} Review the new total, then press Pay again.` });
+        return;
+      }
       setPay({ phase: "error", message: e instanceof Error ? e.message : "PayPal is unavailable right now." });
     }
   }
@@ -265,12 +288,12 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                 </span>
                 <h2 id="co-modal-title">Approve it in the PayPal window</h2>
                 <p>
-                  Log in with a PayPal <b>sandbox buyer</b> account and press Pay. Then come back here and the agent will
-                  capture the payment and book each supplier.
+                  Log in with a PayPal <b>sandbox buyer</b> account and press Pay Now. This page continues on its own
+                  once PayPal sends you back, then captures the payment and books each supplier.
                 </p>
                 <div className="co-modal-actions">
                   <button type="button" className="btn btn-ember" onClick={() => router.push("/booked")}>
-                    I’ve approved, book my trip
+                    Already approved? Continue
                     <span className="btn-arrow">
                       <Icon name="arrow" />
                     </span>

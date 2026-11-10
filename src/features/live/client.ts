@@ -2,7 +2,7 @@
 
 import type { PlanStreamEvent } from "@/app/api/plan/route";
 import type { CaptureStreamEvent } from "@/app/api/payments/capture/route";
-import type { TravelOfferView } from "@/features/planner/travelOffer";
+import type { ItineraryPlanView } from "@/features/planner/travelOffer";
 import { getDestination, origins, type TripPrefs } from "@/features/ui-mock/destinations";
 
 /** The wire shape `/api/plan` accepts (see `tripBriefSchema`). */
@@ -86,8 +86,9 @@ async function* readNdjson<T>(body: ReadableStream<Uint8Array>): AsyncGenerator<
 }
 
 async function errorText(response: Response, fallback: string): Promise<string> {
-  const body: unknown = await response.json().catch(() => null);
-  return (body as { error?: string } | null)?.error ?? fallback;
+  const body = (await response.json().catch(() => null)) as { error?: string; reason?: string | null } | null;
+  // A specific reason ("At most 9 travellers per trip.") beats the generic error.
+  return body?.reason ?? body?.error ?? fallback;
 }
 
 /** Streams `/api/plan`. Each event is handed to `onEvent` as it arrives. */
@@ -103,18 +104,43 @@ export async function streamPlan(brief: TripBriefWire, onEvent: (event: PlanStre
 
 export type OrderResult = { orderId: string; approveUrl: string; amountMinorUnits: number };
 
-export async function createOrder(offers: TravelOfferView[]): Promise<OrderResult> {
+/**
+ * A refused order. `code: "quote-repriced"` carries the re-priced plan and its
+ * new quote id: show the new total, and the traveller pays that quote instead.
+ */
+export class OrderError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+    readonly repriced?: { quoteId: string; plan: ItineraryPlanView; previousTotalMinorUnits: number },
+  ) {
+    super(message);
+  }
+}
+
+/** Pays the server-held quote. The browser never sends prices or offers. */
+export async function createOrder(quoteId: string | undefined): Promise<OrderResult> {
+  if (!quoteId) throw new OrderError("This plan needs a refresh before it can be paid. Ask the planner to plan it again.");
   const response = await fetch("/api/payments/order", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ offers }),
+    body: JSON.stringify({ quoteId }),
   });
-  if (!response.ok) throw new Error(await errorText(response, "PayPal is unavailable right now."));
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as
+      | { error?: string; code?: string; quoteId?: string; plan?: ItineraryPlanView; previousTotalMinorUnits?: number }
+      | null;
+    const repriced =
+      body?.code === "quote-repriced" && body.quoteId && body.plan
+        ? { quoteId: body.quoteId, plan: body.plan, previousTotalMinorUnits: body.previousTotalMinorUnits ?? 0 }
+        : undefined;
+    throw new OrderError(body?.error ?? "PayPal is unavailable right now.", body?.code, repriced);
+  }
   return (await response.json()) as OrderResult;
 }
 
 export async function streamCapture(
-  input: { orderId: string; offers: TravelOfferView[]; forceFailureOfferId?: string; destId?: string; title?: string },
+  input: { orderId: string; forceFailureOfferId?: string; destId?: string; title?: string },
   onEvent: (event: CaptureStreamEvent) => void,
 ): Promise<void> {
   const response = await fetch("/api/payments/capture", {

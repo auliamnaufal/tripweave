@@ -117,7 +117,7 @@ function BookedInner({ view, payment }: { view: AnyTripView; payment: LivePaymen
           return { ...s, rows: next };
         });
 
-      void streamCapture({ orderId: payment.orderId, offers: view.offers, destId: view.plan.prefs.destId, title: view.title }, (event) => {
+      void streamCapture({ orderId: payment.orderId, destId: view.plan.prefs.destId, title: view.title }, (event) => {
         if (event.kind === "payment") {
           update((s) => ({ ...s, payment: event.status === "COMPLETED" ? `PayPal payment completed · ${usd.format(event.amountMinorUnits / 100)}` : `PayPal status: ${event.status}` }));
           if (event.status === "COMPLETED") record();
