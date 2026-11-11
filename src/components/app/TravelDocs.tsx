@@ -28,12 +28,14 @@ import "./docs.css";
 export const kindIcon: Record<DocKind, IconName> = { passport: "passport", id: "user", visa: "globe", insurance: "shield" };
 const needLabel: Record<Need, string> = { required: "Required", check: "Check", recommended: "Optional" };
 
-/** Hidden file input you can open for a specific document type. */
-export function useDocPicker(onFile: (file: File, kind?: DocKind) => void) {
+/** Hidden file input you can open for a specific document type and traveler. */
+export function useDocPicker(onFile: (file: File, kind?: DocKind, travelerIndex?: number) => void) {
   const ref = useRef<HTMLInputElement>(null);
   const kindRef = useRef<DocKind | undefined>(undefined);
-  const open = (kind?: DocKind) => {
+  const travelerRef = useRef<number | undefined>(undefined);
+  const open = (kind?: DocKind, travelerIndex?: number) => {
     kindRef.current = kind;
+    travelerRef.current = travelerIndex;
     ref.current?.click();
   };
   const input = (
@@ -45,7 +47,7 @@ export function useDocPicker(onFile: (file: File, kind?: DocKind) => void) {
       onChange={(e) => {
         const f = e.target.files?.[0];
         e.target.value = "";
-        if (f) onFile(f, kindRef.current);
+        if (f) onFile(f, kindRef.current, travelerRef.current);
       }}
     />
   );
@@ -73,7 +75,7 @@ export function DocChecklist({
 }: {
   prefs: TripPrefs | null;
   busy?: boolean;
-  onPick: (kind: DocKind) => void;
+  onPick: (kind: DocKind, travelerIndex: number) => void;
   variant?: "chat" | "panel";
 }) {
   const docs = useDocs();
@@ -81,11 +83,13 @@ export function DocChecklist({
     ? readiness(prefs, docs)
     : docKinds.map((kind) => {
         const doc = findDoc(docs, kind);
-        return { req: { kind, need: "recommended" as Need, why: docMeta[kind].hint }, doc, status: doc ? docStatus(doc, null) : ("missing" as ReqStatus) };
+        return { req: { kind, need: "recommended" as Need, why: docMeta[kind].hint, travelerIndex: 0 }, doc, status: doc ? docStatus(doc, null) : ("missing" as ReqStatus) };
       });
   const required = rows.filter((r) => r.req.need === "required");
   const ready = required.filter((r) => r.status === "ok").length;
   const dest = prefs ? getDestination(prefs.destId) : null;
+  // More than one row of the same kind means one per traveler, so the label needs to say which.
+  const countByKind = rows.reduce<Partial<Record<DocKind, number>>>((m, r) => ({ ...m, [r.req.kind]: (m[r.req.kind] ?? 0) + 1 }), {});
 
   return (
     <div className={`td-check td-check-${variant}`}>
@@ -102,13 +106,14 @@ export function DocChecklist({
       </div>
       <ul className="td-rows">
         {rows.map(({ req, doc, status }) => (
-          <li key={req.kind} className={`td-row is-${status}`}>
+          <li key={`${req.kind}-${req.travelerIndex}`} className={`td-row is-${status}`}>
             <span className="td-icon">
               <Icon name={kindIcon[req.kind]} size={17} />
             </span>
             <span className="td-text">
               <b>
                 {docMeta[req.kind].label}
+                {(countByKind[req.kind] ?? 0) > 1 && ` · Traveler ${req.travelerIndex + 1}`}
                 {prefs && <em className={`td-need need-${req.need}`}>{needLabel[req.need]}</em>}
               </b>
               <small>{doc ? `•••• ${doc.last4} · valid until ${fmtDate(doc.expires)}` : req.why}</small>
@@ -116,7 +121,7 @@ export function DocChecklist({
             {doc && status === "ok" ? (
               <StatusPill status="ok" />
             ) : (
-              <button type="button" className={`td-upload ${doc ? "is-replace" : ""}`} onClick={() => onPick(req.kind)} disabled={busy}>
+              <button type="button" className={`td-upload ${doc ? "is-replace" : ""}`} onClick={() => onPick(req.kind, req.travelerIndex)} disabled={busy}>
                 <Icon name="upload" size={14} />
                 {doc ? "Replace" : "Upload"}
               </button>
@@ -141,16 +146,19 @@ export function DocumentsPanel({ prefs }: { prefs: TripPrefs }) {
   const settings = useDocSettings();
   const user = useUser();
   const [addKind, setAddKind] = useState<DocKind>("passport");
+  const [addTraveler, setAddTraveler] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [dragging, setDragging] = useState(false);
 
-  function save(file: File, kind?: DocKind) {
+  function save(file: File, kind?: DocKind, travelerIndex?: number) {
     const problem = validateFile(file);
     if (problem) return setError(problem);
     setError(null);
-    const doc = readDocument({ kind: kind ?? addKind, fileName: file.name, fileSize: file.size, holder: user?.name ?? "Traveller", prefs, source: "account" });
+    const idx = travelerIndex ?? addTraveler;
+    const holder = idx === 0 ? user?.name ?? "Traveller" : `Traveller ${idx + 1}`;
+    const doc = readDocument({ kind: kind ?? addKind, fileName: file.name, fileSize: file.size, holder, prefs, source: "account", travelerIndex: idx });
     docsStore.set(upsertDoc(docsStore.get(), doc));
     setJustAdded(doc.id);
   }
@@ -180,14 +188,14 @@ export function DocumentsPanel({ prefs }: { prefs: TripPrefs }) {
 
       <section>
         <h2 className="ac-h2">Ready for your next trip?</h2>
-        <DocChecklist prefs={prefs} onPick={(k) => picker.open(k)} variant="panel" />
+        <DocChecklist prefs={prefs} onPick={(k, idx) => picker.open(k, idx)} variant="panel" />
       </section>
 
       <section>
         <h2 className="ac-h2">On file</h2>
         <div className="td-grid">
           {docs.map((d) => (
-            <DocCard key={d.id} doc={d} prefs={prefs} fresh={justAdded === d.id} onReplace={() => picker.open(d.kind)} />
+            <DocCard key={d.id} doc={d} prefs={prefs} fresh={justAdded === d.id} onReplace={() => picker.open(d.kind, d.travelerIndex)} />
           ))}
           <div
             className={`td-add ${dragging ? "is-drag" : ""}`}
@@ -214,7 +222,16 @@ export function DocumentsPanel({ prefs }: { prefs: TripPrefs }) {
                 </button>
               ))}
             </div>
-            <button type="button" className="btn btn-sm" onClick={() => picker.open(addKind)}>
+            {prefs.travelers > 1 && (
+              <div className="td-kinds" role="radiogroup" aria-label="Traveler">
+                {Array.from({ length: prefs.travelers }, (_, i) => (
+                  <button key={i} type="button" role="radio" aria-checked={addTraveler === i} className={addTraveler === i ? "is-on" : ""} onClick={() => setAddTraveler(i)}>
+                    Traveler {i + 1}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button type="button" className="btn btn-sm" onClick={() => picker.open(addKind, addTraveler)}>
               <Icon name="upload" size={14} /> Choose file
             </button>
             <small>or drop it here · JPG, PNG, HEIC or PDF up to 10 MB</small>
@@ -371,16 +388,20 @@ export function DocShareSummary({ prefs, suppliers }: { prefs: TripPrefs; suppli
   const docs = useDocs();
   const settings = useDocSettings();
   const rows = readiness(prefs, docs).filter((r) => r.req.need !== "recommended" || r.doc);
+  const countByKind = rows.reduce<Partial<Record<DocKind, number>>>((m, r) => ({ ...m, [r.req.kind]: (m[r.req.kind] ?? 0) + 1 }), {});
   return (
     <div className="td-share">
       <ul className="td-rows">
         {rows.map(({ req, doc, status }) => (
-          <li key={req.kind} className={`td-row is-${status}`}>
+          <li key={`${req.kind}-${req.travelerIndex}`} className={`td-row is-${status}`}>
             <span className="td-icon">
               <Icon name={kindIcon[req.kind]} size={16} />
             </span>
             <span className="td-text">
-              <b>{docMeta[req.kind].label}</b>
+              <b>
+                {docMeta[req.kind].label}
+                {(countByKind[req.kind] ?? 0) > 1 && ` · Traveler ${req.travelerIndex + 1}`}
+              </b>
               <small>{doc ? `•••• ${doc.last4} · shared with ${suppliers.join(", ")}` : req.need === "required" ? "Missing. Add it before paying." : req.why}</small>
             </span>
             {doc ? <StatusPill status={status} /> : <Link href="/account?tab=documents" className="td-upload">Add</Link>}

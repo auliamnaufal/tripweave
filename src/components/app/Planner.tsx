@@ -554,7 +554,7 @@ export function Planner() {
     push({ id: nid(), role: "agent", kind: "docs" });
   }
 
-  async function uploadDoc(file: File, expected?: DocKind) {
+  async function uploadDoc(file: File, expected?: DocKind, expectedTraveler?: number) {
     if (busy) return;
     setBusy(true);
     setSuggestions([]);
@@ -568,9 +568,11 @@ export function Planner() {
     }
     const p = planned ? prefsRef.current : null;
     const current = docsStore.get();
-    const firstOpen = p ? (blockers(p, current)[0] ?? readiness(p, current).find((r) => r.status !== "ok"))?.req.kind : undefined;
-    const kind = expected ?? guessKind(file.name, firstOpen ?? "passport");
-    const doc = readDocument({ kind, fileName: file.name, fileSize: file.size, holder: user?.name ?? "Traveller", prefs: p, source: "chat" });
+    const firstOpen = p ? blockers(p, current)[0] ?? readiness(p, current).find((r) => r.status !== "ok") : undefined;
+    const kind = expected ?? guessKind(file.name, firstOpen?.req.kind ?? "passport");
+    const travelerIndex = expectedTraveler ?? firstOpen?.req.travelerIndex ?? 0;
+    const holder = travelerIndex === 0 ? user?.name ?? "Traveller" : `Traveller ${travelerIndex + 1}`;
+    const doc = readDocument({ kind, fileName: file.name, fileSize: file.size, holder, prefs: p, source: "chat", travelerIndex });
     const status = docStatus(doc, p);
     const label = docMeta[kind].label;
     await runWork(`Reading your ${label.toLowerCase()}`, [
@@ -595,7 +597,7 @@ export function Planner() {
     setBusy(false);
   }
 
-  const picker = useDocPicker((file, kind) => void uploadDoc(file, kind));
+  const picker = useDocPicker((file, kind, travelerIndex) => void uploadDoc(file, kind, travelerIndex));
 
   async function handleDocIntent(text: string, intent: DocIntent) {
     setBusy(true);
@@ -624,6 +626,8 @@ export function Planner() {
       await say("Which one should I remove? Say “remove my passport”, for example. Here’s what’s on file:");
       push({ id: nid(), role: "agent", kind: "docs" });
     } else {
+      // Chat can't tell which traveler "my passport" means with more than one on file; removes traveler 1's.
+      // Account → Travel documents removes a specific traveler's copy directly.
       const doc = findDoc(current, intent.kind);
       const label = docMeta[intent.kind].label.toLowerCase();
       if (!doc) {
@@ -1062,7 +1066,7 @@ export function Planner() {
                         block={b}
                         prefs={prefs}
                         docPrefs={planned ? prefs : null}
-                        onPickDoc={(k) => picker.open(k)}
+                        onPickDoc={(k, idx) => picker.open(k, idx)}
                         busy={busy}
                         onAnswer={answer}
                         onSkip={skipQuestions}
@@ -1405,7 +1409,7 @@ function AgentBlock({
   block: Exclude<Block, { role: "user" }>;
   prefs: TripPrefs | null;
   docPrefs: TripPrefs | null;
-  onPickDoc: (k: DocKind) => void;
+  onPickDoc: (k: DocKind, travelerIndex: number) => void;
   busy: boolean;
   onAnswer: (q: QuestionId, v: string) => void;
   onSkip: () => void;

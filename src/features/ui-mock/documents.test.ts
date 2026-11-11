@@ -6,10 +6,18 @@ const NOW = Date.UTC(2026, 10, 10);
 
 describe("travel documents", () => {
   it("asks for a passport abroad and only a photo ID for domestic trips", () => {
-    expect(requirementsFor({ ...defaultPrefs("kyoto"), origin: "San Francisco" }).map((r) => r.kind)).toEqual(["passport", "visa", "insurance"]);
-    expect(requirementsFor({ ...defaultPrefs("oahu"), origin: "New York" })[0].kind).toBe("id");
-    expect(requirementsFor({ ...defaultPrefs("bali"), origin: "Jakarta" })[0].kind).toBe("id");
-    expect(requirementsFor({ ...defaultPrefs("oahu"), origin: "London" })[0].kind).toBe("passport");
+    expect(requirementsFor({ ...defaultPrefs("kyoto"), origin: "San Francisco", travelers: 1 }).map((r) => r.kind)).toEqual(["passport", "visa", "insurance"]);
+    expect(requirementsFor({ ...defaultPrefs("oahu"), origin: "New York", travelers: 1 })[0].kind).toBe("id");
+    expect(requirementsFor({ ...defaultPrefs("bali"), origin: "Jakarta", travelers: 1 })[0].kind).toBe("id");
+    expect(requirementsFor({ ...defaultPrefs("oahu"), origin: "London", travelers: 1 })[0].kind).toBe("passport");
+  });
+
+  it("asks for one passport, visa and ID per traveler, but one insurance policy for the group", () => {
+    const prefs = { ...defaultPrefs("kyoto"), origin: "San Francisco", travelers: 3 };
+    const reqs = requirementsFor(prefs);
+    expect(reqs.filter((r) => r.kind === "passport").map((r) => r.travelerIndex)).toEqual([0, 1, 2]);
+    expect(reqs.filter((r) => r.kind === "visa")).toHaveLength(3);
+    expect(reqs.filter((r) => r.kind === "insurance")).toHaveLength(1);
   });
 
   it("flags a passport that expires within six months of the trip", () => {
@@ -20,14 +28,20 @@ describe("travel documents", () => {
     expect(docStatus({ ...doc, expires: "2025-01-01" }, prefs, NOW)).toBe("expired");
   });
 
-  it("clears the blocker once the passport is on file, keeping one doc per kind", () => {
-    const prefs = defaultPrefs("lisbon");
-    expect(blockers(prefs, []).map((b) => b.req.kind)).toEqual(["passport"]);
+  it("needs one passport per traveler, and replacing a traveler's doc keeps one doc per traveler", () => {
+    const prefs = { ...defaultPrefs("lisbon"), travelers: 2 };
+    expect(blockers(prefs, []).map((b) => b.req.kind)).toEqual(["passport", "passport"]);
+
     const a = readDocument({ kind: "passport", fileName: "a.jpg", fileSize: 1, holder: "A", prefs, source: "chat" }, NOW);
     const b = readDocument({ kind: "passport", fileName: "b.jpg", fileSize: 1, holder: "A", prefs, source: "chat" }, NOW + 1);
     const docs = upsertDoc(upsertDoc([], a), b);
-    expect(docs).toHaveLength(1);
-    expect(blockers(prefs, docs)).toEqual([]);
+    expect(docs).toHaveLength(1); // same traveler (index 0 by default): replaces, not duplicates
+    expect(blockers(prefs, docs).map((bl) => bl.req.travelerIndex)).toEqual([1]); // traveler 2 still missing
+
+    const c = readDocument({ kind: "passport", fileName: "c.jpg", fileSize: 1, holder: "B", prefs, source: "chat", travelerIndex: 1 }, NOW + 2);
+    const docs2 = upsertDoc(docs, c);
+    expect(docs2).toHaveLength(2); // distinct traveler: added, not replaced
+    expect(blockers(prefs, docs2)).toEqual([]);
   });
 
   it("guesses the type from the file name and rejects bad files", () => {
