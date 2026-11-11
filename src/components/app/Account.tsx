@@ -224,7 +224,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                                   <Icon name="ticket" size={14} /> Tickets
                                 </Link>
                               ) : (
-                                <Link href={`/plan?resume=${encodeURIComponent(t.tripId!)}`} className="btn btn-sm btn-ghost">
+                                <Link href={`/plan?resume=${encodeURIComponent(t.tripId!)}&dest=${encodeURIComponent(t.destId)}`} className="btn btn-sm btn-ghost">
                                   Itinerary
                                 </Link>
                               )}

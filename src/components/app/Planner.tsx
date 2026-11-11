@@ -50,7 +50,7 @@ import { AccountMenu } from "@/components/app/AccountMenu";
 import type { AlternativeSlot } from "@/features/suppliers/alternatives";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
 import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
-import { loadChatHistory, loadTrip, logChatMessage, syncTrip } from "@/features/db/sync";
+import { hydrateFromServer, loadChatHistory, loadTrip, logChatMessage, syncTrip } from "@/features/db/sync";
 
 type StepStatus = "pending" | "running" | "done";
 type Step = { id: string; tool: string; label: string; status: StepStatus; result?: string; preview?: "flights" | "hotels" | "activities" };
@@ -123,6 +123,9 @@ export function Planner() {
   const [qIndex, setQIndex] = useState<number | null>(null);
   const [planned, setPlanned] = useState(false);
   const [busy, setBusy] = useState(false);
+  // True only while opening a trip from "Recent plans" or a resume link, so the welcome
+  // screen doesn't flash behind the fetch and read like a new chat instead of a loading one.
+  const [resuming, setResuming] = useState(false);
   const [stage, setStage] = useState(0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [input, setInput] = useState("");
@@ -921,34 +924,54 @@ export function Planner() {
     setBusy(false);
   }
 
+  /**
+   * A clicked trip id can be a client-fabricated placeholder (written to "Recent plans"
+   * the instant a plan is made, before the server has confirmed its real id) or a stale
+   * local cache entry that never got reconciled. Refresh from the server and retry once
+   * by destId before giving up, so the right history loads on the first click instead of
+   * silently falling through to a blank "new chat".
+   */
+  async function resolveTrip(tripId: string, destId: string | null) {
+    const direct = await loadTrip(tripId);
+    if (direct || !destId || !alive.current) return { tripId, trip: direct };
+    await hydrateFromServer();
+    if (!alive.current) return { tripId, trip: null };
+    const fresh = historyStore.get().find((h) => h.destId === destId);
+    if (!fresh) return { tripId, trip: null };
+    return { tripId: fresh.id, trip: await loadTrip(fresh.id) };
+  }
+
   /** Resumes a trip from "Recent plans": restores its stored chat transcript and plan, so the traveller can keep chatting about it. */
   async function openRecent(tripId: string, destId: string) {
     if (busy) return;
     setBusy(true);
-    const trip = await loadTrip(tripId);
+    setResuming(true);
+    const { tripId: resolvedId, trip } = await resolveTrip(tripId, destId);
     if (!alive.current) return;
+    setResuming(false);
     if (!trip) {
-      // Couldn't load by id (a lingering client-side id from the instant before the
-      // server confirmed one, or the trip's gone) — a fresh start beats a blank screen.
+      // Still nothing after a retry — the trip's genuinely gone. A fresh start beats a blank screen.
       setBusy(false);
       void start(getDestination(destId).name);
       return;
     }
-    await applyResumedTrip(tripId, trip);
+    await applyResumedTrip(resolvedId, trip);
   }
 
-  /** Resumes a trip linked to from elsewhere (the Account page's Trips tab) by id alone, via `/plan?resume=<id>`. */
-  async function openByUrl(tripId: string) {
+  /** Resumes a trip linked to from elsewhere (the Account page's Trips tab) via `/plan?resume=<id>&dest=<destId>`. */
+  async function openByUrl(tripId: string, destId: string | null) {
     if (busy) return;
     setBusy(true);
-    const trip = await loadTrip(tripId);
+    setResuming(true);
+    const { tripId: resolvedId, trip } = await resolveTrip(tripId, destId);
     if (!alive.current) return;
+    setResuming(false);
     if (!trip) {
-      // No destination to fall back to here, unlike openRecent, so a blank planner beats a guess.
+      // No destination to fall back to when the link carries none, unlike openRecent, so a blank planner beats a guess.
       setBusy(false);
       return;
     }
-    await applyResumedTrip(tripId, trip);
+    await applyResumedTrip(resolvedId, trip);
   }
 
   function reset() {
@@ -975,7 +998,7 @@ export function Planner() {
     const resumeId = params.get("resume");
     if (resumeId && !started.current) {
       started.current = true;
-      void openByUrl(resumeId);
+      void openByUrl(resumeId, params.get("dest"));
       return;
     }
     const q = params.get("q");
@@ -1015,7 +1038,12 @@ export function Planner() {
         </p>
 
         <div className="pl-thread" ref={threadRef} data-lenis-prevent>
-          {blocks.length === 0 ? (
+          {resuming ? (
+            <div className="pl-welcome pl-welcome-loading" aria-busy="true">
+              <span className="bk-spin" />
+              <p className="pl-welcome-sub">Loading your trip…</p>
+            </div>
+          ) : blocks.length === 0 ? (
             <div className="pl-welcome">
               <p className="pl-hi">Hi {firstName}</p>
               <h1>Where do you want to go?</h1>
