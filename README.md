@@ -39,6 +39,7 @@ Each pick has **More like this** (`POST /api/gear/similar`): Channel3's `/v1/sim
 
 - Before payment, clicking a bar opens the swap panel for that kind (the same instant edits as the Change buttons).
 - After payment, each bar shows what its booking became, read from what capture stored (`/api/tickets`, the same source as the e-tickets): ✓ booked with its reference, or ↺ refunded to the traveller's PayPal (struck through, with the supplier's reason). The heading says how much came back.
+- When an activity was refunded, **Find a replacement** (`POST /api/rebook`) runs a rebooking agent over the empty slot. Code lists the activities from the quote's own search that fit: inside the trip dates, clear of every flight and activity still booked, and priced within the refund (`src/features/rebook/rebook.ts`). The agent (`src/features/agent/rebookAgent.ts`) reads them through a `find_replacements` tool and picks up to two per slot with a one-line reason. The route checks every pick against that list again, then the timeline draws each pick as a dashed ghost bar beside the refunded one. These are suggestions only: nothing is booked or charged, and the refund has already gone back to PayPal.
 
 ### Trip spend (AG Studio)
 
