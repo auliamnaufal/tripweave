@@ -111,9 +111,24 @@ export function createPartnerAdapter(profile: PartnerProfile, bases: Partial<Rec
       if (!pricing || !base || !offer.productKey) return { status: "unavailable", reason: "This partner no longer sells this item." };
       const { baseSupplier, baseId, baseRef } = decodeRef(offer);
       // The partner's price follows its source: re-check the source, keep the partner's margin.
-      const checked = await base.reprice({ ...offer, id: baseId, supplier: baseSupplier, supplierRef: baseRef });
+      // Ask the source about its own price, not the partner's: a source whose
+      // prices never move echoes back what it was given, and multiplying the
+      // partner's price by the margin again compounded it on every reprice,
+      // so checkout never settled on a total.
+      const factor = factorFor(profile, offer.productKey, pricing);
+      const baseCostMinorUnits = minorUnits(Math.round(offer.costMinorUnits / factor));
+      const checked = await base.reprice({
+        ...offer,
+        id: baseId,
+        supplier: baseSupplier,
+        supplierRef: baseRef,
+        costMinorUnits: baseCostMinorUnits,
+      });
       if (checked.status === "unavailable") return checked;
-      const costMinorUnits = minorUnits(Math.round(checked.offer.costMinorUnits * factorFor(profile, offer.productKey, pricing)));
+      const costMinorUnits =
+        checked.status === "unchanged"
+          ? offer.costMinorUnits
+          : minorUnits(Math.round(checked.offer.costMinorUnits * factor));
       const supplierRef = [profile.name, baseSupplier, baseId, checked.offer.supplierRef].join(SEP);
       const updated: TravelOffer = { ...offer, supplierRef, costMinorUnits, retrievedAt: checked.offer.retrievedAt, expiresAt: checked.offer.expiresAt };
       return costMinorUnits === offer.costMinorUnits && supplierRef === offer.supplierRef
