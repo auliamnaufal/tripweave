@@ -8,6 +8,7 @@ import { usd } from "@/features/ui-mock/data";
 import { createOrder, OrderError, type TravellerName } from "@/features/live/client";
 import { livePaymentStore, livePlanStore } from "@/features/live/liveStore";
 import { isPayPalReturnMessage } from "@/features/live/paypalReturn";
+import { syncEdits } from "@/features/live/planEditor";
 import { SandboxBuyer } from "@/components/app/SandboxBuyer";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
 import { useDocs, useHydrated, useTripPrefs, useUser } from "@/features/ui-mock/tripStore";
@@ -115,7 +116,7 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
     const people: TravellerName[] = [];
     for (let i = 1; i <= view.travelers; i++) {
       const full = value(i === 1 ? "name" : `traveller-${i}`) || (i === 1 ? user?.name ?? "" : "");
-      const parts = full.split(/s+/).filter(Boolean);
+      const parts = full.split(/\s+/).filter(Boolean);
       const firstName = parts.length > 1 ? parts.slice(0, -1).join(" ") : parts[0] ?? "Guest";
       const lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0] ?? String(i);
       people.push({ firstName, lastName, ...(i === 1 && email.includes("@") ? { email } : {}) });
@@ -129,7 +130,15 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
     const popup = window.open("", "paypal-approve", "width=520,height=720");
     setPay({ phase: "creating" });
     try {
-      const order = await createOrder(view.quoteId, readTravellers());
+      // An edit made a moment ago may still be saving: pay the plan on screen, never the one before it.
+      if (livePlanStore.get()?.syncing) await syncEdits();
+      const fresh = livePlanStore.get();
+      if (fresh?.syncing || fresh?.syncError) {
+        popup?.close();
+        setPay({ phase: "error", message: fresh.syncError ?? "Your last change is still saving. Try again in a moment." });
+        return;
+      }
+      const order = await createOrder(fresh?.quoteId ?? view.quoteId, readTravellers());
       livePaymentStore.set({ ...order, planRetrievedAt: view.offers[0]?.retrievedAt ?? "" });
       if (popup) popup.location.href = order.approveUrl;
       setPay({ phase: "approve", approveUrl: order.approveUrl });
@@ -277,6 +286,12 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                 </b>
               </button>
               <p className="co-fine">
+                {live && (
+                  <>
+                    Want something different? <a href="/trip">Change flights, stay, activities or dates</a> — anything can change until you approve in PayPal.
+                    <br />
+                  </>
+                )}
                 <span className="tag-sample">{live ? "PayPal sandbox" : "Demo"}</span> Tripweave is the merchant of record. Each supplier is then
                 booked by our agent with this payment. By paying you agree to the <a href="/legal#terms">Terms</a> and{" "}
                 <a href="/legal#privacy">Privacy notice</a>.
@@ -323,6 +338,9 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                 <button type="button" className="co-modal-cancel" onClick={closeModal}>
                   Cancel
                 </button>
+                <button type="button" className="co-modal-cancel" onClick={() => router.push("/trip")}>
+                  Change the plan first (nothing is charged until you approve)
+                </button>
               </>
             )}
             {pay.phase === "error" && (
@@ -336,6 +354,11 @@ function CheckoutInner({ view, prefs }: { view: AnyTripView; prefs: TripPrefs })
                   <button type="button" className="btn" onClick={closeModal}>
                     Back to checkout
                   </button>
+                  {live && (
+                    <button type="button" className="btn btn-ghost" onClick={() => router.push("/trip")}>
+                      Change the plan
+                    </button>
+                  )}
                 </div>
               </>
             )}

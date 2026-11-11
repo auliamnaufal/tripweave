@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { PlatformMark } from "@/components/app/DealPanel";
-import type { TicketItem, TicketsResponse } from "@/app/api/tickets/route";
+import { isTicketable, type TicketItem, type TicketsResponse } from "@/features/tickets/types";
 import { useLivePayment } from "@/features/live/liveStore";
 import "./tickets.css";
 
@@ -15,6 +15,9 @@ const usd = (minor: number) => money.format(minor / 100);
 
 const kindIcon: Record<TicketItem["kind"], IconName> = { flight: "plane", hotel: "bed", activity: "ticket" };
 const kindLabel: Record<TicketItem["kind"], string> = { flight: "Boarding pass", hotel: "Hotel voucher", activity: "Activity ticket" };
+
+const pdfHref = (orderId: string, offerId?: string) =>
+  `/api/tickets/pdf?orderId=${encodeURIComponent(orderId)}${offerId ? `&offerId=${encodeURIComponent(offerId)}` : ""}`;
 
 /** Times print in the offer's own offset, the way the airport or hotel shows them. */
 function localParts(iso: string) {
@@ -44,11 +47,11 @@ function Qr({ value, label }: { value: string; label: string }) {
   return src ? <img className="tk-qr" src={src} alt={`QR code for ${label}`} width={120} height={120} /> : <span className="tk-qr is-empty" />;
 }
 
-function Ticket({ item, travellers }: { item: TicketItem; travellers: string[] }) {
+function Ticket({ item, travellers, orderId }: { item: TicketItem; travellers: string[]; orderId: string }) {
   const start = localParts(item.startsAt);
   const end = localParts(item.endsAt);
   const leg = item.kind === "flight" ? route(item.title) : null;
-  const booked = item.status === "booked" || item.status === "paid_direct";
+  const booked = isTicketable(item);
   return (
     <article className={`tk ${booked ? "" : "is-void"}`} aria-label={`${kindLabel[item.kind]}: ${item.title}`}>
       <div className="tk-main">
@@ -117,6 +120,11 @@ function Ticket({ item, travellers }: { item: TicketItem; travellers: string[] }
       <div className="tk-stub">
         {booked ? <Qr value={item.qr} label={item.title} /> : <span className="tk-qr is-empty" />}
         <small className="tk-mono">{booked ? "Show at check-in" : "Void"}</small>
+        {booked && (
+          <a className="tk-pdf" href={pdfHref(orderId, item.offerId)} target="_blank" rel="noopener">
+            <Icon name="file" size={14} /> Open PDF
+          </a>
+        )}
       </div>
     </article>
   );
@@ -142,7 +150,8 @@ export function Tickets({ orderId: requested }: { orderId?: string }) {
     };
   }, [orderId]);
 
-  const travellers = state.data?.travellers.map((t) => `${t.firstName} ${t.lastName}`) ?? [];
+  const data = state.data;
+  const travellers = data?.travellers.map((t) => `${t.firstName} ${t.lastName}`) ?? [];
 
   return (
     <div className="tk-page">
@@ -152,9 +161,20 @@ export function Tickets({ orderId: requested }: { orderId?: string }) {
           <p className="tk-kicker">E-tickets</p>
           <h1 className="display">Your trip documents</h1>
           {state.data && (
-            <p className="tk-sub">
-              PayPal order <span className="tk-mono">{state.data.orderId}</span> · {usd(state.data.paidMinorUnits)} paid once
-            </p>
+            <div className="tk-subrow">
+              <p className="tk-sub">
+                PayPal order <span className="tk-mono">{state.data.orderId}</span> · {usd(state.data.paidMinorUnits)} paid once
+              </p>
+              {state.data.items.some(isTicketable) && (
+                <a
+                  className="btn btn-sm btn-ghost"
+                  href={pdfHref(state.data.orderId)}
+                  download={`tripweave-${state.data.orderId}.pdf`}
+                >
+                  <Icon name="download" size={15} /> Download all (PDF)
+                </a>
+              )}
+            </div>
           )}
         </header>
 
@@ -166,10 +186,10 @@ export function Tickets({ orderId: requested }: { orderId?: string }) {
         {state.error && <p className="tk-empty">{state.error}</p>}
         {orderId && !state.data && !state.error && <p className="tk-empty">Loading your tickets…</p>}
 
-        {state.data && (
+        {data && (
           <div className="tk-list">
-            {state.data.items.map((item) => (
-              <Ticket key={item.offerId} item={item} travellers={travellers} />
+            {data.items.map((item) => (
+              <Ticket key={item.offerId} item={item} travellers={travellers} orderId={data.orderId} />
             ))}
           </div>
         )}

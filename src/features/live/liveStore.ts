@@ -1,10 +1,10 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { ItineraryPlanView } from "@/features/planner/travelOffer";
+import type { ItineraryPlanView, TravelOfferView } from "@/features/planner/travelOffer";
 import type { ProductComparison } from "@/features/suppliers/compare";
 import type { DealSummary } from "@/features/suppliers/deal";
-import type { AlternativeSlot } from "@/features/suppliers/alternatives";
+import type { AlternativeOption, AlternativeSlot } from "@/features/suppliers/alternatives";
 import { registerCustomDestination, type CustomPlace, type TripPrefs } from "@/features/ui-mock/destinations";
 import type { OrderResult, TripBriefWire } from "./client";
 
@@ -28,6 +28,17 @@ export type LivePlan = {
   place?: CustomPlace;
   /** Other options per flight leg and stay from the same search, for instant swaps. */
   alternatives?: AlternativeSlot[];
+  /** Activities that can be added or removed, from the same search. */
+  activityOptions?: AlternativeOption[];
+  /** Full offers behind every option, so a tap rebuilds the plan locally at once. */
+  choices?: TravelOfferView[];
+  /**
+   * The plan on screen has edits the server hasn't saved as a quote yet.
+   * `quoteId` still names the last saved one, so paying waits for this to clear.
+   */
+  syncing?: boolean;
+  /** Why the last edit couldn't be saved (the plan was put back as it was). */
+  syncError?: string;
 };
 
 export type LivePayment = OrderResult & { planRetrievedAt: string };

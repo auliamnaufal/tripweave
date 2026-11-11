@@ -117,15 +117,20 @@ export type IntakeResult =
   | { kind: "brief"; brief: TripBriefWire; summary: string; stops: { city: string; country: string; nights: number }[]; dayPlans: { day: number; wish: string }[] }
   | { kind: "clarify"; question: string };
 
-/** Swaps one flight leg or stay for another option from the same search (instant, no new search). */
-export async function swapOption(quoteId: string, fromOfferId: string, toOfferId: string): Promise<PlanResult & { differenceMinorUnits: number }> {
-  const response = await fetch("/api/plan/swap", {
+/**
+ * Saves an edited selection (swapped flights/stays, added or removed
+ * activities) as a new payable quote. No new search: the server rebuilds the
+ * plan from the quote's own search snapshot.
+ */
+export async function editPlan(quoteId: string, offerIds: string[], signal?: AbortSignal): Promise<PlanResult> {
+  const response = await fetch("/api/plan/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ quoteId, fromOfferId, toOfferId }),
+    body: JSON.stringify({ quoteId, offerIds }),
+    signal,
   });
-  if (!response.ok) throw new Error(await errorText(response, "I couldn’t change that option."));
-  return (await response.json()) as PlanResult & { differenceMinorUnits: number };
+  if (!response.ok) throw new Error(await errorText(response, "I couldn’t change that."));
+  return (await response.json()) as PlanResult;
 }
 
 export type GearKitResult = GearKit & { disclosure: string };

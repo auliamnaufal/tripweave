@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
@@ -11,6 +11,11 @@ import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 import { DealPanel } from "@/components/app/DealPanel";
 import { GearPanel } from "@/components/app/GearPanel";
+import { ActivityOptions, EditStatus, LiveOptions } from "@/components/app/LiveOptions";
+import { EditTripDialog } from "@/components/app/EditTrip";
+import { useLivePlan } from "@/features/live/liveStore";
+import { syncEdits } from "@/features/live/planEditor";
+import "./edit-trip.css";
 
 const kindIcon: Record<string, IconName> = {
   flight: "plane",
@@ -64,6 +69,18 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   // was already paid for if an order for it is already in the store.
   const orders = useOrders();
   const paid = orders.some((o) => o.destId === view.plan.prefs.destId && o.total === total);
+  // Until it's paid, the plan stays editable here: options swap in place, no chat round trip.
+  const live = useLivePlan();
+  const editable = isLive(view) && !paid && Boolean(live?.quoteId);
+  const [openEdit, setOpenEdit] = useState<"flight" | "hotel" | "activity" | null>(null);
+  const [editingTrip, setEditingTrip] = useState(false);
+  const [editMessage, setEditMessage] = useState<string | null>(null);
+  const toggleEdit = (kind: "flight" | "hotel" | "activity") => setOpenEdit((open) => (open === kind ? null : kind));
+  const syncing = Boolean(live?.syncing);
+  // A reload in the middle of a save picks the save back up.
+  useEffect(() => {
+    if (syncing) void syncEdits();
+  }, [syncing]);
   const over = total > view.budget;
   const flightsTotal = view.flights.reduce((s, f) => s + f.price, 0);
   const actTotal = view.activities.reduce((s, a) => s + a.price, 0);
@@ -192,6 +209,13 @@ function TripViewInner({ view }: { view: AnyTripView }) {
             <li>
               <Icon name="plane" size={15} /> From {view.origin}
             </li>
+            {editable && live && (
+              <li>
+                <button type="button" className="trip-hero-edit" onClick={() => setEditingTrip(true)}>
+                  <Icon name="calendar" size={14} /> Edit dates, travellers or budget
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </section>
@@ -252,7 +276,19 @@ function TripViewInner({ view }: { view: AnyTripView }) {
           </section>
 
           <section id="flights" className="trip-section">
-            <h2 className="trip-h2 display">Flights</h2>
+            <div className="trip-h2-row">
+              <h2 className="trip-h2 display">Flights</h2>
+              {editable && live?.alternatives?.some((slot) => slot.kind === "flight") && (
+                <button type="button" className="trip-edit-toggle" aria-expanded={openEdit === "flight"} aria-controls="trip-edit-flight" onClick={() => toggleEdit("flight")}>
+                  <Icon name="refresh" size={14} /> {openEdit === "flight" ? "Done" : "Change flights"}
+                </button>
+              )}
+            </div>
+            {editable && openEdit === "flight" && (
+              <div id="trip-edit-flight" className="trip-edit-panel">
+                <LiveOptions kind="flight" onChange={setEditMessage} />
+              </div>
+            )}
             <div className="trip-flights">
               {view.flights.map((f) => (
                 <article key={f.id} className="trip-card trip-flight">
@@ -289,7 +325,19 @@ function TripViewInner({ view }: { view: AnyTripView }) {
           </section>
 
           <section id="stay" className="trip-section">
-            <h2 className="trip-h2 display">Where you’ll sleep</h2>
+            <div className="trip-h2-row">
+              <h2 className="trip-h2 display">Where you’ll sleep</h2>
+              {editable && live?.alternatives?.some((slot) => slot.kind === "hotel") && (
+                <button type="button" className="trip-edit-toggle" aria-expanded={openEdit === "hotel"} aria-controls="trip-edit-hotel" onClick={() => toggleEdit("hotel")}>
+                  <Icon name="refresh" size={14} /> {openEdit === "hotel" ? "Done" : "Change stay"}
+                </button>
+              )}
+            </div>
+            {editable && openEdit === "hotel" && (
+              <div id="trip-edit-hotel" className="trip-edit-panel">
+                <LiveOptions kind="hotel" onChange={setEditMessage} />
+              </div>
+            )}
             <article className="trip-card trip-stay">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={view.hotel.image} alt={view.hotel.name} />
@@ -331,6 +379,20 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 </article>
               ))}
             </div>
+            {editable && Boolean(live?.activityOptions?.length) && (
+              <>
+                <div className="trip-h2-row" style={{ marginTop: 18 }}>
+                  <button type="button" className="trip-edit-toggle" style={{ marginLeft: 0 }} aria-expanded={openEdit === "activity"} aria-controls="trip-edit-activity" onClick={() => toggleEdit("activity")}>
+                    <Icon name="compass" size={14} /> {openEdit === "activity" ? "Done" : "Add or remove things to do"}
+                  </button>
+                </div>
+                {openEdit === "activity" && (
+                  <div id="trip-edit-activity" className="trip-edit-panel">
+                    <ActivityOptions onChange={setEditMessage} />
+                  </div>
+                )}
+              </>
+            )}
           </section>
           {isLive(view) && view.quoteId && (
             <section id="gear" className="trip-section">
@@ -372,6 +434,10 @@ function TripViewInner({ view }: { view: AnyTripView }) {
               <Link href="/booked" className="btn" style={{ width: "100%" }}>
                 <Icon name="check" size={16} /> Paid · view booking
               </Link>
+            ) : syncing ? (
+              <button type="button" className="pay-btn" disabled aria-describedby="trip-edit-status">
+                Saving your changes…
+              </button>
             ) : (
               <Link href="/checkout" className="pay-btn">
                 Pay once with{" "}
@@ -381,12 +447,16 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                 </b>
               </Link>
             )}
+            <div id="trip-edit-status">
+              <EditStatus message={editMessage} />
+            </div>
             <p className="trip-fine">
               {paid ? "This trip is paid for. Every booking is already underway." : "One approval covers every booking. Nothing is stored after you pay."}
             </p>
           </div>
         </aside>
       </div>
+      {editingTrip && live && <EditTripDialog live={live} onClose={() => setEditingTrip(false)} />}
     </div>
   );
 }

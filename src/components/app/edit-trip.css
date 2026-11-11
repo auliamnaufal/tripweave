@@ -1,0 +1,213 @@
+/* Edit trip dialog (dates, nights, travellers, budget) */
+.et-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(13, 22, 17, 0.55);
+  backdrop-filter: blur(6px);
+  animation: et-fade 0.3s ease both;
+}
+
+.et-card {
+  display: grid;
+  gap: 14px;
+  width: min(520px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 22px 22px 18px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  animation: et-rise 0.45s var(--ease-out) both;
+}
+
+.et-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.et-head h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.et-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.et-sub {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+
+.et-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.et-fields label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.et-fields input {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.et-fields input:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 1px;
+}
+
+.et-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 14px;
+  list-style: none;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font-size: 0.84rem;
+}
+
+.et-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.et-steps li.is-done {
+  color: var(--ink-soft);
+}
+
+.et-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ember);
+}
+
+.et-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.et-summary {
+  margin-right: auto;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+
+/* Itinerary page: inline editing under each section */
+.trip-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.trip-edit-toggle[aria-expanded="true"] {
+  border-color: var(--forest-700);
+  background: var(--paper);
+}
+
+.trip-h2-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trip-h2-row .trip-h2 {
+  margin-bottom: 0;
+}
+
+.trip-edit-panel {
+  margin: 14px 0 18px;
+}
+
+.trip-edit-panel .pl-options-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.trip-summary .lo-status {
+  margin-top: 8px;
+}
+
+.trip-hero-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@keyframes et-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes et-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .et-backdrop,
+  .et-card {
+    animation: none;
+  }
+}

@@ -42,8 +42,9 @@ import {
 import { DocChecklist, useDocPicker } from "@/components/app/TravelDocs";
 import { DealLine } from "@/components/app/DealPanel";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
-import { briefFromPrefs, homeOrigin, readTrip, streamPlan, swapOption, type TripBriefWire } from "@/features/live/client";
-import { LiveOptions } from "@/components/app/LiveOptions";
+import { briefFromPrefs, homeOrigin, readTrip, streamPlan, type TripBriefWire } from "@/features/live/client";
+import { ActivityOptions, EditStatus, LiveOptions } from "@/components/app/LiveOptions";
+import { fromPlanResult, swapChoice } from "@/features/live/planEditor";
 import { AppSidebar, MobileNav, useSidebarCollapsed } from "@/components/app/AppSidebar";
 import { AccountMenu } from "@/components/app/AccountMenu";
 import type { AlternativeSlot } from "@/features/suppliers/alternatives";
@@ -264,7 +265,7 @@ export function Planner() {
           });
           setStage((s) => Math.max(s, liveStage[event.tool] ?? s));
         } else if (event.kind === "plan") {
-          out.plan = { prefs: p, brief, plan: event.plan, note: event.note, source: event.source, retrievedAt: event.retrievedAt, quoteId: event.quoteId, comparisons: event.comparisons, deal: event.deal, alternatives: event.alternatives, ...(place ? { place } : {}) };
+          out.plan = fromPlanResult(event, { prefs: p, brief, place });
         } else if (event.kind === "error") {
           out.failure = event.message;
         }
@@ -789,36 +790,20 @@ export function Planner() {
   }
 
   /**
-   * Swaps one flight leg or stay for another option from the same search.
-   * Instant: the server rebuilds the plan from the saved catalog, no new
-   * search, no agent run. Every card reads the live plan, so all of them follow.
+   * "Make the hotel cheaper" typed in the chat: the same instant swap the
+   * option buttons make (no new search, no agent run), answered in one line.
    */
   async function swapLive(fromOfferId: string, toOfferId: string) {
     const current = livePlanStore.get();
-    if (!current?.quoteId || busy) return;
-    setBusy(true);
-    setSuggestions([]);
-    try {
-      const result = await swapOption(current.quoteId, fromOfferId, toOfferId);
-      prevLive.current = current;
-      livePlanStore.set({
-        ...current,
-        plan: result.plan,
-        note: result.note,
-        quoteId: result.quoteId,
-        deal: result.deal,
-        comparisons: result.comparisons,
-        alternatives: result.alternatives,
-        retrievedAt: result.retrievedAt,
-      });
-      livePaymentStore.set(null);
-      const view = liveView({ ...current, plan: result.plan, deal: result.deal, alternatives: result.alternatives });
-      await say(`${result.note} New total ${usd.format(view.total)}. Say “undo that” to switch back.`, 150);
-    } catch (error) {
-      await say(error instanceof Error ? error.message : "I couldn’t change that option.", 150);
-    }
-    setSuggestions(liveSuggestions("plan", getDestination(prefsRef.current?.destId).name));
-    setBusy(false);
+    if (!current?.quoteId) return;
+    const before = liveView(current).total;
+    const problem = swapChoice(fromOfferId, toOfferId);
+    if (problem) return void say(problem, 150);
+    prevLive.current = current;
+    const next = livePlanStore.get();
+    const after = next ? liveView(next).total : before;
+    const to = next?.plan.offers.find((offer) => offer.id === toOfferId);
+    await say(`Switched to ${to?.title ?? "the cheaper option"}: ${usd.format(before - after)} less, ${usd.format(after)} in total. Say “undo that” to switch back.`, 150);
   }
 
   /** "Make the hotel cheaper" / "Find a cheaper flight": the cheapest cheaper option, swapped in instantly. */
@@ -1008,7 +993,6 @@ export function Planner() {
                         onSkip={skipQuestions}
                         onPick={pickOption}
                         alternatives={live?.alternatives}
-                        onSwap={swapLive}
                         onStart={start}
                         lv={lv}
                       />
@@ -1038,13 +1022,20 @@ export function Planner() {
             <span className="pl-actionbar-total">
               <b>{usd.format(lv.total)}</b>
               <small>{lv.title}</small>
+              <EditStatus />
             </span>
             <Link href="/trip" className="btn btn-sm">
               View itinerary
             </Link>
-            <Link href="/checkout" className="btn btn-sm btn-ember">
-              Pay once with PayPal
-            </Link>
+            {live?.syncing ? (
+              <button type="button" className="btn btn-sm btn-ember" disabled>
+                Saving…
+              </button>
+            ) : (
+              <Link href="/checkout" className="btn btn-sm btn-ember">
+                Pay once with PayPal
+              </Link>
+            )}
           </div>
         )}
         {blocks.length > 0 && (
@@ -1246,7 +1237,11 @@ export function Planner() {
                 </div>
               </div>
             )}
-            {panelTab === "todo" && (
+            {panelTab === "todo" && lv && live?.activityOptions?.length ? (
+              <div className="pl-tab-body">
+                <ActivityOptions />
+              </div>
+            ) : panelTab === "todo" && (
               <div className="pl-tab-body pl-todo">
                 {dest.activities.map((a) => (
                   <article key={a.id} className={plan.prefs.activityIds.includes(a.id) ? "is-picked" : ""}>
@@ -1279,12 +1274,18 @@ export function Planner() {
                 <Link href="/trip" className="btn btn-ghost btn-sm">
                   Itinerary
                 </Link>
-                <Link href="/checkout" className="btn btn-ember btn-sm">
-                  Pay {usd.format(plan.totals.total)}
-                  <span className="btn-arrow">
-                    <Icon name="arrow" />
-                  </span>
-                </Link>
+                {live?.syncing ? (
+                  <button type="button" className="btn btn-ember btn-sm" disabled>
+                    Saving…
+                  </button>
+                ) : (
+                  <Link href="/checkout" className="btn btn-ember btn-sm">
+                    Pay {usd.format(plan.totals.total)}
+                    <span className="btn-arrow">
+                      <Icon name="arrow" />
+                    </span>
+                  </Link>
+                )}
               </div>
             )}
           </div>
@@ -1311,11 +1312,11 @@ function AgentBlock({
   onStart,
   lv,
   alternatives,
-  onSwap,
+
 }: {
   lv: LiveView | null;
   alternatives?: AlternativeSlot[];
-  onSwap: (fromOfferId: string, toOfferId: string) => void;
+
   block: Exclude<Block, { role: "user" }>;
   prefs: TripPrefs | null;
   docPrefs: TripPrefs | null;
@@ -1427,10 +1428,10 @@ function AgentBlock({
     );
   }
   if (block.kind === "flights" && lv && alternatives?.some((slot) => slot.kind === "flight")) {
-    return <LiveOptions slots={alternatives} kind="flight" busy={busy} onSwap={onSwap} />;
+    return <LiveOptions kind="flight" />;
   }
   if (block.kind === "hotels" && lv && alternatives?.some((slot) => slot.kind === "hotel")) {
-    return <LiveOptions slots={alternatives} kind="hotel" busy={busy} onSwap={onSwap} />;
+    return <LiveOptions kind="hotel" />;
   }
   if (block.kind === "flights" && lv) {
     return (
@@ -1542,6 +1543,22 @@ function AgentBlock({
           </article>
         ))}
       </div>
+    );
+  }
+  if (block.kind === "days" && lv) {
+    return (
+      <>
+        <ol className="pl-days">
+          {plan.days.map((d) => (
+            <li key={d.day}>
+              <span className="pl-day-num">Day {d.day}</span>
+              <b>{d.title}</b>
+              <small>{d.items.map((x) => x.title).join(" · ")}</small>
+            </li>
+          ))}
+        </ol>
+        <ActivityOptions />
+      </>
     );
   }
   if (block.kind === "days") {
