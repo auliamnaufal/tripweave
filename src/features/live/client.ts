@@ -1,5 +1,6 @@
 "use client";
 
+import type { RebookResponse } from "@/features/rebook/types";
 import type { PlanStreamEvent } from "@/app/api/plan/route";
 import type { CaptureStreamEvent } from "@/app/api/payments/capture/route";
 import type { GearKit } from "@/features/gear/gearKit";
@@ -238,4 +239,15 @@ export async function streamCapture(
   });
   if (!response.ok || !response.body) throw new Error(await errorText(response, "Payment could not be confirmed."));
   for await (const event of readNdjson<CaptureStreamEvent>(response.body)) onEvent(event);
+}
+
+/** The rebooking agent's replacement suggestions for a paid order's refunded activities. Never books or charges. */
+export async function fetchRebookSuggestions(orderId: string): Promise<RebookResponse> {
+  const response = await fetch("/api/rebook", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderId }),
+  });
+  if (!response.ok) throw new Error(await errorText(response, "The rebooking agent couldn’t answer right now."));
+  return (await response.json()) as RebookResponse;
 }
