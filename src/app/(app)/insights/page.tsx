@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
-import { AppShell } from "@/components/app/AppShell";
 import { TripInsights } from "@/components/app/TripInsights";
 import { buildInsights, type InsightsData } from "@/features/insights/insightsData";
 import { listPaidQuotesWithBookings } from "@/features/quotes/quoteStore";
 import { authedUser } from "@/lib/supabase/authedUser";
-import "@/components/app/app.css";
 
 export const metadata: Metadata = { title: "Trip spend | Tripweave" };
 
@@ -24,9 +22,5 @@ export default async function InsightsPage() {
     }
   }
 
-  return (
-    <AppShell>
-      <TripInsights data={data} error={error} licenseKey={process.env.AG_STUDIO_LICENSE_KEY || undefined} aiEnabled={Boolean(process.env.OPENAI_API_KEY)} />
-    </AppShell>
-  );
+  return <TripInsights data={data} error={error} licenseKey={process.env.AG_STUDIO_LICENSE_KEY || undefined} aiEnabled={Boolean(process.env.OPENAI_API_KEY)} />;
 }

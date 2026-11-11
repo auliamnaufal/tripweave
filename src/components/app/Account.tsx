@@ -26,6 +26,7 @@ import { AirportPicker } from "@/components/app/AirportPicker";
 import { toggleSaved } from "@/features/db/sync";
 import { useSignOut } from "@/components/app/AccountMenu";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
+import { AccountSkeleton } from "@/components/app/Skeleton";
 
 type Tab = "trips" | "saved" | "documents" | "preferences" | "payments" | "settings";
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
@@ -43,7 +44,7 @@ const diets = ["No restrictions", "Vegetarian", "Vegan", "Pescatarian", "Gluten-
 export function Account() {
   const hydrated = useHydrated();
   const user = useUser();
-  if (!hydrated) return <div className="ac-page" aria-busy="true" />;
+  if (!hydrated) return <AccountSkeleton />;
   if (!user) {
     return (
       <div className="ac-page">

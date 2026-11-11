@@ -9,6 +9,7 @@ import { PlatformMark } from "@/components/app/DealPanel";
 import { isTicketable, type TicketItem, type TicketsResponse } from "@/features/tickets/types";
 import { useLivePayment } from "@/features/live/liveStore";
 import "./tickets.css";
+import { TicketListSk } from "@/components/app/Skeleton";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const usd = (minor: number) => money.format(minor / 100);
@@ -184,7 +185,14 @@ export function Tickets({ orderId: requested }: { orderId?: string }) {
           </p>
         )}
         {state.error && <p className="tk-empty">{state.error}</p>}
-        {orderId && !state.data && !state.error && <p className="tk-empty">Loading your tickets…</p>}
+        {orderId && !state.data && !state.error && (
+          <div aria-busy="true">
+            <p className="sr-only" role="status">
+              Loading your tickets…
+            </p>
+            <TicketListSk />
+          </div>
+        )}
 
         {data && (
           <div className="tk-list">

@@ -46,6 +46,7 @@ import { briefFromPrefs, homeOrigin, readTrip, streamPlan, type TripBriefWire } 
 import { ActivityOptions, EditStatus, LiveOptions } from "@/components/app/LiveOptions";
 import { fromPlanResult, swapChoice } from "@/features/live/planEditor";
 import { AppSidebar, MobileNav, useSidebarCollapsed } from "@/components/app/AppSidebar";
+import { ChatSkeleton, PlannerSkeleton } from "@/components/app/PlannerSkeleton";
 import { AccountMenu } from "@/components/app/AccountMenu";
 import type { AlternativeSlot } from "@/features/suppliers/alternatives";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
@@ -191,7 +192,7 @@ export function Planner() {
   useGSAP(
     () => {
       if (!ready || prefersReducedMotion()) return;
-      gsap.from(".pl-side > *", { x: -16, opacity: 0, stagger: 0.04, duration: 0.8, ease: "expo.out" });
+      // The sidebar is already on screen in the skeleton, so only the welcome animates in.
       gsap.from(".pl-welcome > *", { y: 28, opacity: 0, stagger: 0.07, duration: 1.1, ease: "expo.out", delay: 0.1 });
       gsap.from(".pl-place", { y: 30, opacity: 0, stagger: 0.05, duration: 1, ease: "expo.out", delay: 0.35 });
     },
@@ -1013,8 +1014,8 @@ export function Planner() {
   const placeholder = activeQuestion ? activeQuestion.placeholder : busy ? "The planner is working…" : planned ? "Ask for a change: cheaper, slower, more food…" : "Name a place…";
   const destSaved = dest ? saved.includes(dest.id) : false;
 
-  // Hold an empty shell until we know who is here, so a signed-out visitor never sees the planner flash before sign-in.
-  if (!ready) return <div ref={root} className="pl" aria-busy="true" />;
+  // Hold a skeleton until we know who is here, so a signed-out visitor never sees the planner flash before sign-in.
+  if (!ready) return <PlannerSkeleton ref={root} />;
 
   return (
     <div ref={root} className={`pl ${collapsed ? "is-collapsed" : ""}`}>
@@ -1039,10 +1040,7 @@ export function Planner() {
 
         <div className="pl-thread" ref={threadRef} data-lenis-prevent>
           {resuming ? (
-            <div className="pl-welcome pl-welcome-loading" aria-busy="true">
-              <span className="bk-spin" />
-              <p className="pl-welcome-sub">Loading your trip…</p>
-            </div>
+            <ChatSkeleton />
           ) : blocks.length === 0 ? (
             <div className="pl-welcome">
               <p className="pl-hi">Hi {firstName}</p>

@@ -16,6 +16,7 @@ import { blockers, docMeta } from "@/features/ui-mock/documents";
 import type { TripPrefs } from "@/features/ui-mock/destinations";
 import { DocShareSummary } from "@/components/app/TravelDocs";
 import { gsap, prefersReducedMotion, useGSAP } from "@/lib/gsap";
+import { CheckoutSkeleton } from "@/components/app/Skeleton";
 
 const steps = ["Trip summary", "Review & pay", "Booking"];
 
@@ -23,7 +24,7 @@ export function Checkout() {
   const hydrated = useHydrated();
   const prefs = useTripPrefs();
   const view = useTripView();
-  if (!hydrated) return <div className="co-page" aria-busy="true" />;
+  if (!hydrated) return <CheckoutSkeleton />;
   return <CheckoutInner view={view} prefs={prefs} />;
 }
 
