@@ -164,3 +164,80 @@
   background: repeating-linear-gradient(135deg, #e7e2d6 0 4px, #cfc6b2 4px 8px);
   outline: 1px dashed var(--line-strong);
 }
+
+/* The rebooking agent's proposals for a refunded slot: ghosts, not bookings. */
+.tw-tl .tw-tl-suggested.b-sch-event {
+  background: color-mix(in srgb, var(--ember) 10%, #fff);
+  color: var(--ink);
+  outline: 1.5px dashed var(--ember);
+  outline-offset: -1.5px;
+  cursor: help;
+}
+.tw-tl-suggest-tip {
+  color: var(--ember);
+  font-weight: 600;
+}
+.trip-timeline-legend .trip-timeline-suggested-swatch {
+  background: color-mix(in srgb, var(--ember) 12%, #fff);
+  outline: 1.5px dashed var(--ember);
+  outline-offset: -1.5px;
+}
+
+.trip-rebook {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper-2);
+}
+.trip-rebook-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.trip-rebook-head p {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.trip-rebook-head b {
+  color: var(--ink);
+}
+.trip-rebook-error {
+  margin: 10px 0 0;
+  color: #b42318;
+  font-size: 0.88rem;
+}
+.trip-rebook-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.trip-rebook-list li {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--ember);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  font-size: 0.88rem;
+}
+.trip-rebook-list small {
+  color: var(--ink-soft);
+}
+.trip-rebook-list .trip-rebook-for {
+  color: var(--ember);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.trip-rebook-foot {
+  margin: 10px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}

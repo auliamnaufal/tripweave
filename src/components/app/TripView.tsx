@@ -17,7 +17,9 @@ import { EditTripDialog } from "@/components/app/EditTrip";
 import { useLivePayment, useLivePlan } from "@/features/live/liveStore";
 import { usePaidBookings } from "@/features/live/usePaidBookings";
 import { syncEdits } from "@/features/live/planEditor";
-import { itineraryTimeline, type TimelineKind } from "@/features/timeline/itineraryTimeline";
+import { itineraryTimeline, wallClock, type TimelineKind } from "@/features/timeline/itineraryTimeline";
+import { fetchRebookSuggestions } from "@/features/live/client";
+import type { RebookResponse } from "@/features/rebook/types";
 import "./edit-trip.css";
 import "./itinerary-timeline.css";
 
@@ -92,9 +94,24 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const toggleEdit = (kind: "flight" | "hotel" | "activity") => setOpenEdit((open) => (open === kind ? null : kind));
   const syncing = Boolean(live?.syncing);
+  // The rebooking agent's replacements for activities that were refunded, for this paid order only.
+  const [rebook, setRebook] = useState<{ orderId: string; phase: "loading" | "done" | "error"; data?: RebookResponse; error?: string } | null>(null);
+  const rebookHere = rebook && rebook.orderId === paidOrderId ? rebook : null;
+  const suggestions = rebookHere?.data?.suggestions;
+  const freedActivities = paidBookings?.items.filter((item) => item.kind === "activity" && (item.refunded || item.status === "failed")).length ?? 0;
+  async function askRebookAgent() {
+    if (!paidOrderId) return;
+    const orderId = paidOrderId;
+    setRebook({ orderId, phase: "loading" });
+    try {
+      setRebook({ orderId, phase: "done", data: await fetchRebookSuggestions(orderId) });
+    } catch (e) {
+      setRebook({ orderId, phase: "error", error: e instanceof Error ? e.message : "The rebooking agent couldn’t answer right now." });
+    }
+  }
   const timeline = useMemo(
-    () => (live ? itineraryTimeline(live.plan, live.brief.travelWindow, paidBookings?.items) : null),
-    [live, paidBookings],
+    () => (live ? itineraryTimeline(live.plan, live.brief.travelWindow, paidBookings?.items, suggestions) : null),
+    [live, paidBookings, suggestions],
   );
   const refundedMinorUnits = timeline?.bars.reduce((sum, b) => sum + (b.outcome?.state === "refunded" ? b.costMinorUnits : 0), 0) ?? 0;
   const canSwap = (kind: TimelineKind) =>
@@ -300,7 +317,52 @@ function TripViewInner({ view }: { view: AnyTripView }) {
             {refundedMinorUnits > 0 && (
               <li><i className="trip-timeline-refunded-swatch" /> Refunded to your PayPal</li>
             )}
+            {suggestions && suggestions.length > 0 && (
+              <li><i className="trip-timeline-suggested-swatch" /> Agent’s suggested replacement</li>
+            )}
           </ul>
+          {freedActivities > 0 && (
+            <div className="trip-rebook" aria-live="polite">
+              <div className="trip-rebook-head">
+                <p>
+                  <b>{freedActivities === 1 ? "One activity" : `${freedActivities} activities`} couldn’t be booked.</b>{" "}
+                  {rebookHere?.phase === "done"
+                    ? rebookHere.data?.note
+                    : "The rebooking agent can look through the same search for something that fits the empty slot, within what you were refunded."}
+                </p>
+                {rebookHere?.phase !== "done" && (
+                  <button type="button" className="chip" onClick={() => void askRebookAgent()} disabled={rebookHere?.phase === "loading"}>
+                    <Icon name="spark" /> <span className="chip-label">{rebookHere?.phase === "loading" ? "Finding replacements…" : "Find a replacement"}</span>
+                  </button>
+                )}
+              </div>
+              {rebookHere?.phase === "error" && <p className="trip-rebook-error">{rebookHere.error}</p>}
+              {suggestions && suggestions.length > 0 && (
+                <>
+                  <ul className="trip-rebook-list">
+                    {suggestions.map((s) => {
+                      const start = wallClock(s.offer.startsAt);
+                      const end = wallClock(s.offer.endsAt);
+                      const time = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+                      return (
+                        <li key={s.offer.id}>
+                          <span className="trip-rebook-for">Instead of {s.forTitle}</span>
+                          <b>{s.offer.title}</b>
+                          <small>
+                            {start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {time(start)}–{time(end)} ·{" "}
+                            {usd.format(s.offer.costMinorUnits / 100)} of your {usd.format(s.refundMinorUnits / 100)} refund ·{" "}
+                            {s.offer.synthetic ? "Sample listing" : `via ${s.offer.platform}`}
+                          </small>
+                          <span>{s.reason}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="trip-rebook-foot">Suggestions only: nothing is booked or charged, and your refund is already back on PayPal.</p>
+                </>
+              )}
+            </div>
+          )}
         </section>
       )}
 

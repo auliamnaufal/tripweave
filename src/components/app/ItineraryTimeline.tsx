@@ -13,7 +13,8 @@ import type { TimelineBar, TimelineKind, TimelineModel } from "@/features/timeli
 // The plan on a Bryntum Scheduler: a row per kind of booking, a bar per offer,
 // the trip window shaded. Times come from the suppliers, so bars never drag;
 // before payment a click opens the swap panel for that kind, after payment
-// every bar is locked under the PayPal order.
+// every bar is locked under the PayPal order. Bars the rebooking agent
+// proposes for a refunded slot are drawn as dashed ghosts beside the paid ones.
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const hhmm = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -44,6 +45,8 @@ function outcomeIcon(b: TimelineBar): string | null {
       return "fa fa-circle-exclamation";
     case "pending":
       return "fa fa-hourglass-half";
+    case "suggested":
+      return "fa fa-wand-magic-sparkles";
     default:
       return null;
   }
@@ -127,6 +130,12 @@ export default function ItineraryTimeline({ model, paid, onPick, pickable = [] }
             lines.push(`<span class="tw-tl-warn">Couldn't be booked${o.reason ? `: ${enc(o.reason)}` : ""}</span>`, `<span class="tw-tl-ok">${enc(usd.format(b.costMinorUnits / 100))} refunded to your PayPal</span>`);
           if (o?.state === "failed") lines.push(`<span class="tw-tl-warn">Couldn't be booked${o.reason ? `: ${enc(o.reason)}` : ""} · refund pending</span>`);
           if (o?.state === "pending") lines.push(`<span class="tw-tl-tip-foot">Booking in progress</span>`);
+          if (o?.state === "suggested")
+            lines.push(
+              `<span class="tw-tl-suggest-tip">Agent's pick to replace ${enc(o.forTitle)}</span>`,
+              enc(o.reason),
+              `<span class="tw-tl-tip-foot">A suggestion only: not booked, nothing charged</span>`,
+            );
           if (!o) lines.push(paid ? `<span class="tw-tl-tip-foot">Paid with PayPal · locked</span>` : canPick(b.resourceId) ? `<span class="tw-tl-tip-foot">Click to see other options</span>` : "");
           return `<div class="tw-tl-tip">${lines.join("<br>")}</div>`;
         },
@@ -143,6 +152,7 @@ export default function ItineraryTimeline({ model, paid, onPick, pickable = [] }
           "tw-tl-refunded": b.outcome?.state === "refunded",
           "tw-tl-failed": b.outcome?.state === "failed",
           "tw-tl-pending": b.outcome?.state === "pending",
+          "tw-tl-suggested": b.outcome?.state === "suggested",
         });
         // A short tour is still something you can read and hit.
         renderData.width = Math.max(renderData.width, MIN_BAR_PX);

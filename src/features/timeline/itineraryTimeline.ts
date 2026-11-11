@@ -1,4 +1,5 @@
 import type { ItineraryPlanView, TravelOfferView } from "@/features/planner/travelOffer";
+import type { RebookSuggestion } from "@/features/rebook/types";
 
 // The trip page's timeline (Bryntum Scheduler) as plain data: one row per kind
 // of booking, one bar per offer in the plan. Pure, so the checks the planner
@@ -20,7 +21,9 @@ export type TimelineOutcome =
   | { state: "paid-direct" }
   | { state: "refunded"; reason: string | null }
   | { state: "failed"; reason: string | null }
-  | { state: "pending" };
+  | { state: "pending" }
+  /** Not part of the paid trip: the rebooking agent proposes it for a refunded slot. */
+  | { state: "suggested"; reason: string; forTitle: string };
 
 /** The fields of a stored booking the timeline reads (TicketItem has them all). */
 export type BookingOutcomeInput = {
@@ -101,6 +104,7 @@ export function itineraryTimeline(
   plan: Pick<ItineraryPlanView, "offers" | "violations">,
   travelWindow: { startsAt: string; endsAt: string },
   bookings: readonly BookingOutcomeInput[] = [],
+  suggestions: readonly RebookSuggestion[] = [],
 ): TimelineModel {
   const outcomes = new Map(bookings.map((b) => [b.offerId, toOutcome(b)]));
   const byId = new Map(plan.offers.map((o) => [o.id, o]));
@@ -137,6 +141,21 @@ export function itineraryTimeline(
       conflictsWith: [...(clashes.get(o.id) ?? [])],
       ...(outcomes.has(o.id) ? { outcome: outcomes.get(o.id) } : {}),
     }))
+    .concat(
+      suggestions.map((s) => ({
+        id: `suggested:${s.offer.id}`,
+        resourceId: "activity" as const,
+        name: s.offer.title,
+        ...span(s.offer),
+        costMinorUnits: s.offer.costMinorUnits,
+        // Already a display label; platformInfo falls back to it for unknown suppliers.
+        supplier: s.offer.platform,
+        synthetic: s.offer.synthetic,
+        flags: [],
+        conflictsWith: [],
+        outcome: { state: "suggested" as const, reason: s.reason, forTitle: s.forTitle },
+      })),
+    )
     .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
 
   const window = { startDate: wallClock(travelWindow.startsAt), endDate: wallClock(travelWindow.endsAt) };
