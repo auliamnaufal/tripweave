@@ -125,16 +125,15 @@ To pay in sandbox, log in on PayPal's page with a **sandbox personal** account f
 
 `DEMO_MODE=true` makes the earliest activity fail to book every time, so the partial refund shows reliably: the row turns "refunded" in `/booked` and the refund appears on the sandbox capture. It also lets `/lab` route one non-flight offer to a hand-entered sandbox payee. Keep it `false` anywhere else.
 
-## Deploy (Render)
+## Deploy (Heroku)
 
-`render.yaml` is a Render Blueprint: one Node 22 web service that builds with pnpm (via Corepack, pinned by `packageManager`) and runs `next start` on Render's `PORT`.
+One web dyno: `Procfile` runs `next start` on Heroku's `PORT`. The Node buildpack takes Node 22 from `engines`, installs pnpm through Corepack from `packageManager`, and runs `pnpm build`.
 
-1. In Render: **New → Blueprint**, pick this repo. Render asks once for every `sync: false` value; fill them from `.env.example`.
-2. When the service is up, set `APP_BASE_URL` to its URL (e.g. `https://tripweave.onrender.com`). PayPal's `return_url` / `cancel_url` are built from it.
-3. In the PayPal sandbox app → **Webhooks**, add `<APP_BASE_URL>/api/webhooks/paypal` with the events `PAYMENT.CAPTURE.COMPLETED`, `PENDING`, `DENIED`, `DECLINED`, `REVERSED` and `REFUNDED`, then put the webhook id in `PAYPAL_WEBHOOK_ID`.
-4. Optional: `NEXT_PUBLIC_PAYPAL_SANDBOX_BUYER_EMAIL` / `_PASSWORD` show a sandbox buyer login at checkout. They are compiled into the page, so redeploy after setting them.
-
-The free plan sleeps after 15 idle minutes and takes about a minute to wake; `plan: starter` avoids that for a judged demo.
+1. `heroku create <app-name>`, then `git push heroku master` (or connect the GitHub repo under **Deploy** and turn on automatic deploys from `master`).
+2. Set every value from `.env.example` as a config var: `heroku config:set KEY=value ... -a <app-name>`, or **Settings → Config Vars**.
+3. Set `APP_BASE_URL` to the app's URL (e.g. `https://<app-name>.herokuapp.com`). PayPal's `return_url` / `cancel_url` are built from it.
+4. In the PayPal sandbox app → **Webhooks**, add `<APP_BASE_URL>/api/webhooks/paypal` with the events `PAYMENT.CAPTURE.COMPLETED`, `PENDING`, `DENIED`, `DECLINED`, `REVERSED` and `REFUNDED`, then put the webhook id in `PAYPAL_WEBHOOK_ID`.
+5. Optional: `NEXT_PUBLIC_PAYPAL_SANDBOX_BUYER_EMAIL` / `_PASSWORD` show a sandbox buyer login at checkout. They are compiled into the page at build time, so redeploy after setting them.
 
 ## Limits
 

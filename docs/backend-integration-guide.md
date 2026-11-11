@@ -77,7 +77,7 @@ Ini yang menutup celah "harga Duffel sudah kedaluwarsa 15 menit". Untuk sekarang
 
 Saat ini booking berjalan di dalam HTTP stream. Kalau proses mati, quote tertahan di `capturing`. Solusinya:
 1. Capture route hanya: capture → tulis `bookings(pending)` → status quote `booking` → selesai.
-2. Worker (Supabase Edge Function terjadwal, cron Render, atau queue) mengambil `bookings.status='pending'` dengan `select … for update skip locked`, memanggil `adapter.book(offer, traveler, booking.id)`, lalu update baris. Refund untuk yang gagal.
+2. Worker (Supabase Edge Function terjadwal, Heroku Scheduler, atau queue) mengambil `bookings.status='pending'` dengan `select … for update skip locked`, memanggil `adapter.book(offer, traveler, booking.id)`, lalu update baris. Refund untuk yang gagal.
 3. UI berlangganan perubahan `bookings` via Supabase Realtime (atau polling `GET /api/bookings?quoteId=`).
 4. Tambahkan `attempts`, `next_attempt_at`, `last_error` di `bookings` untuk retry dengan backoff.
 
