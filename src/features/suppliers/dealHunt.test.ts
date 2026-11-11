@@ -77,6 +77,36 @@ describe("simulated partners", () => {
     expect(result.offer.id).toBe(resold.id);
     expect(result.offer.costMinorUnits / 44000).toBeCloseTo(resold.costMinorUnits / 40000, 3);
   });
+
+  it("settle on the same price when the source's price never moves", async () => {
+    // A static source (like the sample catalog) echoes back the offer it was
+    // asked about. Repricing the partner offer again and again must not drift.
+    const base = flight("local", "activity-2-wish-fuji", 21780, { productKind: "activity", productKey: "activity:fuji@2026-12-11" });
+    const source: SupplierAdapter = {
+      name: "local",
+      kinds: ["activity"],
+      capability: "bookable",
+      isConfigured: () => true,
+      search: async () => [base],
+      reprice: vi.fn(async (offer: TravelOffer) => ({ status: "unchanged" as const, offer })),
+      book: async () => ({ offerId: "x", status: "booked" as const, bookingRef: "r" }),
+    };
+    const partner = createPartnerAdapter({ ...skybazaar, missingShare: 0 }, { activity: source });
+    const [resold] = await partner.search(brief, "activity");
+
+    let current = resold;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await partner.reprice(current);
+      expect(result.status).toBe("unchanged");
+      if (result.status === "unavailable") return;
+      expect(result.offer.costMinorUnits).toBe(resold.costMinorUnits);
+      current = result.offer;
+    }
+    // The source was asked about (roughly) its own price, not the partner's.
+    expect(source.reprice).toHaveBeenLastCalledWith(expect.objectContaining({ id: "activity-2-wish-fuji", supplier: "local" }));
+    const asked = vi.mocked(source.reprice).mock.calls[0][0].costMinorUnits;
+    expect(Math.abs(asked - 21780)).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("memoizeSearch", () => {
