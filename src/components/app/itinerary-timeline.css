@@ -1,0 +1,166 @@
+/* Bryntum Scheduler on the trip page, in Tripweave's palette. */
+
+.trip-timeline {
+  padding-top: 36px;
+}
+.trip-timeline-head h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.trip-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 14px;
+}
+.trip-timeline-head p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+.trip-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+.trip-timeline-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.trip-timeline-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  display: inline-block;
+}
+.trip-timeline-skeleton {
+  height: 240px;
+  border-radius: 16px;
+  background: var(--paper-2);
+}
+
+.tw-tl {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface, #fff);
+}
+.tw-tl .b-scheduler {
+  --b-primary: var(--forest-700);
+  font-family: inherit;
+}
+.tw-tl-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.tw-tl-row i {
+  color: var(--forest-500);
+  width: 16px;
+  text-align: center;
+}
+
+/* Bars: one colour per kind, matching the budget breakdown. */
+.tw-tl .b-sch-event-wrap .b-sch-event {
+  font-weight: 600;
+  font-size: 0.8rem;
+  border-radius: 8px;
+}
+.tw-tl .tw-tl-flight.b-sch-event {
+  background: var(--forest-700);
+  color: #fff;
+}
+.tw-tl .tw-tl-hotel.b-sch-event {
+  background: var(--sand);
+  color: var(--ink);
+}
+.tw-tl .tw-tl-activity.b-sch-event {
+  background: var(--ember);
+  color: #fff;
+}
+.tw-tl .tw-tl-pickable.b-sch-event {
+  cursor: pointer;
+}
+.tw-tl .tw-tl-pickable.b-sch-event:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px currentColor;
+}
+.tw-tl .tw-tl-paid.b-sch-event {
+  opacity: 0.92;
+}
+.tw-tl .tw-tl-conflict.b-sch-event,
+.tw-tl .tw-tl-outside.b-sch-event {
+  background: repeating-linear-gradient(135deg, #b42318 0 8px, #c2410c 8px 16px);
+  color: #fff;
+  outline: 2px solid #7a1a10;
+}
+
+/* The traveller's dates. */
+.tw-tl .b-sch-range.tw-tl-window {
+  background: color-mix(in srgb, var(--forest-500) 7%, transparent);
+}
+.tw-tl .b-sch-timerange.b-sch-range.tw-tl-window .b-sch-timerange-label,
+.tw-tl .b-sch-range.tw-tl-window label {
+  color: var(--forest-700);
+}
+
+.tw-tl-tip {
+  line-height: 1.5;
+  font-size: 0.85rem;
+}
+.tw-tl-warn {
+  color: #b42318;
+  font-weight: 600;
+}
+.tw-tl-tip-foot {
+  color: #6b6f69;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 640px) {
+  .tw-tl-row span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* After payment: what each booking became. */
+.tw-tl .tw-tl-refunded.b-sch-event {
+  background: repeating-linear-gradient(135deg, #e7e2d6 0 8px, #ddd6c6 8px 16px);
+  color: var(--ink-soft);
+  text-decoration: line-through;
+  outline: 1px dashed var(--line-strong);
+}
+.tw-tl .tw-tl-failed.b-sch-event {
+  background: #fde7e4;
+  color: #b42318;
+  outline: 1px solid #b42318;
+}
+.tw-tl .tw-tl-pending.b-sch-event {
+  opacity: 0.7;
+}
+.tw-tl-ok {
+  color: var(--forest-700);
+  font-weight: 600;
+}
+.trip-timeline-legend .trip-timeline-refunded-swatch {
+  background: repeating-linear-gradient(135deg, #e7e2d6 0 4px, #cfc6b2 4px 8px);
+  outline: 1px dashed var(--line-strong);
+}
