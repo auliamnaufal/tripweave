@@ -2,6 +2,7 @@
 
 import type { PlanStreamEvent } from "@/app/api/plan/route";
 import type { CaptureStreamEvent } from "@/app/api/payments/capture/route";
+import type { GearKit } from "@/features/gear/gearKit";
 import type { ItineraryPlanView } from "@/features/planner/travelOffer";
 import type { PlanResult } from "@/features/quotes/planResult";
 import { getDestination, origins, type TripPrefs } from "@/features/ui-mock/destinations";
@@ -125,6 +126,19 @@ export async function swapOption(quoteId: string, fromOfferId: string, toOfferId
   });
   if (!response.ok) throw new Error(await errorText(response, "I couldn’t change that option."));
   return (await response.json()) as PlanResult & { differenceMinorUnits: number };
+}
+
+export type GearKitResult = GearKit & { disclosure: string };
+
+/** Gear worth packing for a priced plan (Channel3 link-outs; never part of the PayPal order). */
+export async function fetchGearKit(quoteId: string): Promise<GearKitResult> {
+  const response = await fetch("/api/gear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quoteId }),
+  });
+  if (!response.ok) throw new Error(await errorText(response, "I couldn’t put a gear list together."));
+  return (await response.json()) as GearKitResult;
 }
 
 /** The intake agent: free text in, a validated brief (or one clarifying question) out. */
