@@ -111,7 +111,14 @@ To pay in sandbox, log in on PayPal's page with a **sandbox personal** account f
 
 ## Deploy (Render)
 
-`render.yaml` is a Render Blueprint. In Render: **New → Blueprint**, pick this repo, then fill the env values it asks for. Set `APP_BASE_URL` to the service URL, then add `<APP_BASE_URL>/api/webhooks/paypal` as a webhook in the PayPal app (events `PAYMENT.CAPTURE.*`) and put its id in `PAYPAL_WEBHOOK_ID`.
+`render.yaml` is a Render Blueprint: one Node 22 web service that builds with pnpm (via Corepack, pinned by `packageManager`) and runs `next start` on Render's `PORT`.
+
+1. In Render: **New → Blueprint**, pick this repo. Render asks once for every `sync: false` value; fill them from `.env.example`.
+2. When the service is up, set `APP_BASE_URL` to its URL (e.g. `https://tripweave.onrender.com`). PayPal's `return_url` / `cancel_url` are built from it.
+3. In the PayPal sandbox app → **Webhooks**, add `<APP_BASE_URL>/api/webhooks/paypal` with the events `PAYMENT.CAPTURE.COMPLETED`, `PENDING`, `DENIED`, `DECLINED`, `REVERSED` and `REFUNDED`, then put the webhook id in `PAYPAL_WEBHOOK_ID`.
+4. Optional: `NEXT_PUBLIC_PAYPAL_SANDBOX_BUYER_EMAIL` / `_PASSWORD` show a sandbox buyer login at checkout. They are compiled into the page, so redeploy after setting them.
+
+The free plan sleeps after 15 idle minutes and takes about a minute to wake; `plan: starter` avoids that for a judged demo.
 
 ## Limits
 
