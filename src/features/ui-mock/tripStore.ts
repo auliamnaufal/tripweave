@@ -89,7 +89,8 @@ export const DEMO_USER: NonNullable<DemoUser> = {
 
 export const tripStore = createStore<TripPrefs>("tw-trip", defaultPrefs("oahu"));
 export const userStore = createStore<DemoUser>("tw-user", null);
-export const historyStore = createStore<{ id: string; title: string; destId: string; at: string }[]>("tw-history", []);
+export type TripHistoryEntry = { id: string; title: string; destId: string; at: string };
+export const historyStore = createStore<TripHistoryEntry[]>("tw-history", []);
 
 export const useTripPrefs = tripStore.useValue;
 export const useUser = userStore.useValue;
@@ -108,6 +109,32 @@ export const useOrders = ordersStore.useValue;
 /** An order for this (destId, total) pairing already exists — every Pay button for this plan reads this, not just the trip page. */
 export function tripPaidFor(orders: Order[], destId: string, total: number): boolean {
   return orders.some((o) => o.destId === destId && o.total === total);
+}
+
+/** One row in the "all your trips" list: a planned trip, a paid one, or (rarely) both merged into one. */
+export type TripRow = { key: string; tripId: string | null; title: string; destId: string; at: string; paid: boolean; orderId: string | null; total: number | null };
+
+/**
+ * Every trip the traveller has, planned or paid, one row each. A trip never shows twice
+ * under different labels, and a paid one is never mistaken for a draft.
+ *
+ * orders don't carry the trip id they came from (ponytail: `orders.trip_id` exists in the
+ * schema but nothing writes it yet; add that once the capture route threads a trip id through,
+ * then join on it instead). Until then this pairs each order to one not-yet-claimed history
+ * entry for the same destination, oldest-planned-trip-per-destination first. Two concurrent
+ * trips to the same destination can pair with the wrong one of each other cosmetically; the
+ * order id and trip id each row carries are always the real ones, so Tickets and Itinerary
+ * never point at the wrong trip.
+ */
+export function mergeTripRows(history: TripHistoryEntry[], orders: Order[]): TripRow[] {
+  const unclaimed = [...history];
+  const rows: TripRow[] = orders.map((o) => {
+    const i = unclaimed.findIndex((h) => h.destId === o.destId);
+    const h = i === -1 ? null : unclaimed.splice(i, 1)[0];
+    return { key: o.id, tripId: h?.id ?? null, title: h?.title ?? o.title, destId: o.destId, at: o.at, paid: true, orderId: o.id, total: o.total };
+  });
+  for (const h of unclaimed) rows.push({ key: h.id, tripId: h.id, title: h.title, destId: h.destId, at: h.at, paid: false, orderId: null, total: null });
+  return rows.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
 export const savedStore = createStore<string[]>("tw-saved", ["kyoto", "lisbon", "iceland"]);

@@ -897,19 +897,8 @@ export function Planner() {
     route(text);
   }
 
-  /** Resumes a trip from "Recent plans": restores its stored chat transcript and plan, so the traveller can keep chatting about it. */
-  async function openRecent(tripId: string, destId: string) {
-    if (busy) return;
-    setBusy(true);
-    const trip = await loadTrip(tripId);
-    if (!alive.current) return;
-    if (!trip) {
-      // Couldn't load by id (a lingering client-side id from the instant before the
-      // server confirmed one, or the trip's gone) — a fresh start beats a blank screen.
-      setBusy(false);
-      void start(getDestination(destId).name);
-      return;
-    }
+  /** Shared tail of resuming a trip once it's loaded: chat transcript, prefs and plan all swapped in, so one trip's data never bleeds into another's. */
+  async function applyResumedTrip(tripId: string, trip: NonNullable<Awaited<ReturnType<typeof loadTrip>>>) {
     const history = await loadChatHistory(tripId);
     if (!alive.current) return;
     setBlocks(
@@ -932,6 +921,36 @@ export function Planner() {
     setBusy(false);
   }
 
+  /** Resumes a trip from "Recent plans": restores its stored chat transcript and plan, so the traveller can keep chatting about it. */
+  async function openRecent(tripId: string, destId: string) {
+    if (busy) return;
+    setBusy(true);
+    const trip = await loadTrip(tripId);
+    if (!alive.current) return;
+    if (!trip) {
+      // Couldn't load by id (a lingering client-side id from the instant before the
+      // server confirmed one, or the trip's gone) — a fresh start beats a blank screen.
+      setBusy(false);
+      void start(getDestination(destId).name);
+      return;
+    }
+    await applyResumedTrip(tripId, trip);
+  }
+
+  /** Resumes a trip linked to from elsewhere (the Account page's Trips tab) by id alone, via `/plan?resume=<id>`. */
+  async function openByUrl(tripId: string) {
+    if (busy) return;
+    setBusy(true);
+    const trip = await loadTrip(tripId);
+    if (!alive.current) return;
+    if (!trip) {
+      // No destination to fall back to here, unlike openRecent, so a blank planner beats a guess.
+      setBusy(false);
+      return;
+    }
+    await applyResumedTrip(tripId, trip);
+  }
+
   function reset() {
     if (busy) return;
     setBlocks([]);
@@ -945,12 +964,20 @@ export function Planner() {
   // The demo has one account: a signed-out visitor sees the sign-in page first, then comes back here.
   useEffect(() => {
     if (!hydrated || user) return;
+    const resumeId = params.get("resume");
     const q = params.get("q");
-    router.replace(`/login?next=${encodeURIComponent(q ? `/plan?q=${encodeURIComponent(q)}` : "/plan")}`);
+    const next = resumeId ? `/plan?resume=${encodeURIComponent(resumeId)}` : q ? `/plan?q=${encodeURIComponent(q)}` : "/plan";
+    router.replace(`/login?next=${encodeURIComponent(next)}`);
   }, [hydrated, user, params, router]);
 
   useEffect(() => {
     if (!ready) return;
+    const resumeId = params.get("resume");
+    if (resumeId && !started.current) {
+      started.current = true;
+      void openByUrl(resumeId);
+      return;
+    }
     const q = params.get("q");
     if (q && !started.current) {
       started.current = true;
