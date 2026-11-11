@@ -117,6 +117,7 @@
 }
 .pl-recent {
   display: grid;
+  align-content: start;
   gap: 2px;
   min-height: 0;
   overflow: hidden;

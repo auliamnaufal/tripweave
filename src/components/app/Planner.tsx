@@ -20,7 +20,7 @@ import {
   type TripPrefs,
 } from "@/features/ui-mock/destinations";
 import { acknowledgements, applyAnswer, planSummary, questions, suggestionsFor, type QuestionId } from "@/features/ui-mock/agentScript";
-import { docsStore, historyStore, savedStore, tripStore, useDocs, useHydrated, useSaved, useUser } from "@/features/ui-mock/tripStore";
+import { docsStore, historyStore, savedStore, tripPaidFor, tripStore, useDocs, useHydrated, useOrders, useSaved, useUser } from "@/features/ui-mock/tripStore";
 import { tabKeys } from "@/components/app/tabKeys";
 import {
   blockers,
@@ -50,7 +50,7 @@ import { AccountMenu } from "@/components/app/AccountMenu";
 import type { AlternativeSlot } from "@/features/suppliers/alternatives";
 import { livePaymentStore, livePlanStore, useLivePlan, type LivePlan } from "@/features/live/liveStore";
 import { liveView, overlayLive, type LiveView } from "@/features/live/adapter";
-import { logChatMessage, syncTrip } from "@/features/db/sync";
+import { loadChatHistory, loadTrip, logChatMessage, syncTrip } from "@/features/db/sync";
 
 type StepStatus = "pending" | "running" | "done";
 type Step = { id: string; tool: string; label: string; status: StepStatus; result?: string; preview?: "flights" | "hotels" | "activities" };
@@ -143,9 +143,11 @@ export function Planner() {
   const prefsRef = useRef<TripPrefs | null>(null);
   const alive = useRef(true);
   const started = useRef(false);
-  // The DB row for the trip currently being planned, once syncTrip() has returned one — chat
-  // messages logged before that point are saved with no trip_id (still the user's, just unlinked).
+  // The DB row for the trip currently being planned, once syncTrip() has returned one.
   const tripIdRef = useRef<string | null>(null);
+  // Messages logged before tripIdRef is known: held here, then flushed with the real id once
+  // syncTrip() resolves, so no chat turn is ever persisted unlinked from its trip.
+  const pendingChat = useRef<{ role: "user" | "agent"; kind?: string; text: string }[]>([]);
 
   const live = useLivePlan();
   const prevLive = useRef<LivePlan | null>(null);
@@ -153,6 +155,9 @@ export function Planner() {
   const dest = prefs ? getDestination(prefs.destId) : null;
   const lv = useMemo(() => (live && prefs && live.prefs.destId === prefs.destId ? liveView(live) : null), [live, prefs]);
   const plan = useMemo(() => (prefs ? overlayLive(buildPlan(prefs), lv) : null), [prefs, lv]);
+  // Same (destId, total) match TripView.tsx uses: once an order exists for this plan, every Pay button for it shows paid, not just the trip page.
+  const orders = useOrders();
+  const paid = plan ? tripPaidFor(orders, plan.prefs.destId, plan.totals.total) : false;
 
   useEffect(() => {
     alive.current = true;
@@ -190,8 +195,51 @@ export function Planner() {
     { scope: root, dependencies: [ready] },
   );
 
+  function logChat(entry: { role: "user" | "agent"; kind?: string; text: string }) {
+    const tripId = tripIdRef.current;
+    if (tripId) logChatMessage({ ...entry, tripId });
+    else pendingChat.current.push(entry);
+  }
+
+  /** Called once syncTrip() resolves: attaches every buffered turn to the now-known trip. */
+  function flushPendingChat(tripId: string) {
+    const pending = pendingChat.current;
+    pendingChat.current = [];
+    for (const entry of pending) logChatMessage({ ...entry, tripId });
+  }
+
+  /**
+   * Saves the trip's current prefs/plan: creates the row the first time (makePlan),
+   * updates the same row on every refinement after, so edits made while continuing
+   * a resumed chat actually stick instead of only living in this tab's memory.
+   */
+  function persistTrip(p: TripPrefs, planData: unknown, isLive: boolean, totalMinorUnits: number, source?: string) {
+    const d = getDestination(p.destId);
+    void syncTrip({
+      id: tripIdRef.current ?? undefined,
+      destId: p.destId,
+      title: `${d.name}, ${p.nights} nights`,
+      prefs: p,
+      plan: planData,
+      isLive,
+      source,
+      totalMinorUnits,
+      budgetMinorUnits: Math.round(p.budget * 100),
+    }).then((id) => {
+      if (!id) return;
+      tripIdRef.current = id;
+      flushPendingChat(id);
+      // historyStore's entry for a just-created trip starts with a client-fabricated id
+      // (makePlan hasn't heard back from the server yet) — swap in the real one the moment
+      // it's known, so clicking "Recent plans" right away resumes it instead of 400ing.
+      const hist = historyStore.get();
+      const i = hist.findIndex((x) => x.destId === p.destId);
+      if (i !== -1 && hist[i].id !== id) historyStore.set(hist.map((x, k) => (k === i ? { ...x, id } : x)));
+    });
+  }
+
   const push = useCallback((b: Block) => {
-    if (b.role === "user" && b.text) logChatMessage({ role: "user", text: b.text, tripId: tripIdRef.current });
+    if (b.role === "user" && b.text) logChat({ role: "user", text: b.text });
     setBlocks((prev) => [...prev, b]);
   }, []);
   const patch = useCallback(
@@ -206,7 +254,7 @@ export function Planner() {
   }, []);
 
   async function say(text: string, typingMs = 650) {
-    logChatMessage({ role: "agent", kind: "text", text, tripId: tripIdRef.current });
+    logChat({ role: "agent", kind: "text", text });
     const tid = nid();
     push({ id: tid, role: "agent", kind: "typing" });
     await sleep(typingMs);
@@ -310,6 +358,10 @@ export function Planner() {
     if (!value || busy) return;
     setBusy(true);
     setSuggestions([]);
+    // Every new-conversation entry point routes through here, so this is the one place
+    // that needs to drop any trip id/buffer left over from a previous conversation.
+    tripIdRef.current = null;
+    pendingChat.current = [];
     push({ id: nid(), role: "user", text: value });
     const exact = destinations.find((x) => x.name.toLowerCase() === value.toLowerCase());
     const d = value.toLowerCase().includes("surprise") ? pickRandom(destinations) : exact;
@@ -429,16 +481,7 @@ export function Planner() {
       const hl = historyStore.get();
       const stl = stamp();
       historyStore.set([{ id: `${p.destId}-${stl.id}`, title: `${d.name}, ${p.nights} nights`, destId: d.id, at: stl.at }, ...hl.filter((x) => x.destId !== d.id)].slice(0, 6));
-      syncTrip({
-        destId: p.destId,
-        title: `${d.name}, ${p.nights} nights`,
-        prefs: p,
-        plan: liveResult,
-        isLive: true,
-        source: liveResult.source,
-        totalMinorUnits: Math.round(liveView(liveResult).total * 100),
-        budgetMinorUnits: Math.round(p.budget * 100),
-      }).then((id) => (tripIdRef.current = id));
+      persistTrip(p, liveResult, true, Math.round(liveView(liveResult).total * 100), liveResult.source);
       await say(liveSummary(liveView(liveResult)), 300);
       push({ id: nid(), role: "agent", kind: "flights" });
       await sleep(250);
@@ -473,15 +516,7 @@ export function Planner() {
     const h = historyStore.get();
     const st = stamp();
     historyStore.set([{ id: `${p.destId}-${st.id}`, title: `${d.name}, ${p.nights} nights`, destId: d.id, at: st.at }, ...h.filter((x) => x.destId !== d.id)].slice(0, 6));
-    syncTrip({
-      destId: p.destId,
-      title: `${d.name}, ${p.nights} nights`,
-      prefs: p,
-      plan: pl,
-      isLive: false,
-      totalMinorUnits: Math.round(pl.totals.total * 100),
-      budgetMinorUnits: Math.round(p.budget * 100),
-    }).then((id) => (tripIdRef.current = id));
+    persistTrip(p, pl, false, Math.round(pl.totals.total * 100));
     await say(planSummary(pl, fit.adjusted), 300);
     push({ id: nid(), role: "agent", kind: "flights" });
     await sleep(250);
@@ -642,8 +677,10 @@ export function Planner() {
     if (t.includes("undo") && prevPrefs) {
       updatePrefs(prevPrefs);
       setPrevPrefs(null);
-      await say(`Done, back to the previous version. Total is ${usd.format(buildPlan(prevPrefs).totals.total)} again.`);
-      setSuggestions(suggestionsFor(buildPlan(prevPrefs), "undo"));
+      const undonePlan = buildPlan(prevPrefs);
+      persistTrip(prevPrefs, undonePlan, false, Math.round(undonePlan.totals.total * 100));
+      await say(`Done, back to the previous version. Total is ${usd.format(undonePlan.totals.total)} again.`);
+      setSuggestions(suggestionsFor(undonePlan, "undo"));
       setBusy(false);
       return;
     }
@@ -709,6 +746,10 @@ export function Planner() {
       await runWork("Thinking it through", [{ tool: "build_itinerary", label: "Checking the plan against your note", ms: 1100, result: () => "No conflicts found" }]);
       await say("Noted. I’ve kept the plan as is because it already fits. In the full version I’ll re-search with that in mind.");
     }
+    if (next !== p) {
+      const nextPlan = buildPlan(next);
+      persistTrip(next, nextPlan, false, Math.round(nextPlan.totals.total * 100));
+    }
     setSuggestions(suggestionsFor(buildPlan(prefsRef.current ?? next), last));
     setBusy(false);
   }
@@ -720,7 +761,8 @@ export function Planner() {
       if (!prev) return false;
       livePlanStore.set(prev);
       prevLive.current = null;
-      syncHotel(prev.prefs, prev);
+      const prefsAfterUndo = syncHotel(prev.prefs, prev);
+      persistTrip(prefsAfterUndo, prev, true, Math.round(liveView(prev).total * 100), prev.source);
       await say(`Done, back to the previous plan. Total is ${usd.format(liveView(prev).total)} again.`);
       setSuggestions(liveSuggestions("undo", d.name));
       return true;
@@ -759,8 +801,9 @@ export function Planner() {
       return true;
     }
     prevLive.current = current;
-    syncHotel(current.prefs, result);
+    const prefsAfter = syncHotel(current.prefs, result);
     const after = liveView(result);
+    persistTrip(prefsAfter, result, true, Math.round(after.total * 100), result.source);
     const diff = after.total - before.total;
     const change = diff === 0 ? "no change in price" : diff < 0 ? `${usd.format(-diff)} less` : `${usd.format(diff)} more`;
     await say(`${result.note} New total ${usd.format(after.total)} (${change}).`);
@@ -784,8 +827,10 @@ export function Planner() {
     setBusy(true);
     setSuggestions([]);
     const name = kind === "flight" ? `${d.flights[idx].airline} ${d.flights[idx].code}` : d.hotels[idx].name;
-    await say(`Switched to ${name}. New total ${usd.format(buildPlan(next).totals.total)}.`, 350);
-    setSuggestions(suggestionsFor(buildPlan(next), kind === "flight" ? "flight-faster" : "hotel-cheaper"));
+    const nextPlan = buildPlan(next);
+    persistTrip(next, nextPlan, false, Math.round(nextPlan.totals.total * 100));
+    await say(`Switched to ${name}. New total ${usd.format(nextPlan.totals.total)}.`, 350);
+    setSuggestions(suggestionsFor(nextPlan, kind === "flight" ? "flight-faster" : "hotel-cheaper"));
     setBusy(false);
   }
 
@@ -802,6 +847,7 @@ export function Planner() {
     prevLive.current = current;
     const next = livePlanStore.get();
     const after = next ? liveView(next).total : before;
+    if (next) persistTrip(next.prefs, next, true, Math.round(after * 100), next.source);
     const to = next?.plan.offers.find((offer) => offer.id === toOfferId);
     await say(`Switched to ${to?.title ?? "the cheaper option"}: ${usd.format(before - after)} less, ${usd.format(after)} in total. Say “undo that” to switch back.`, 150);
   }
@@ -847,10 +893,39 @@ export function Planner() {
     route(text);
   }
 
-  function openRecent(destId: string) {
+  /** Resumes a trip from "Recent plans": restores its stored chat transcript and plan, so the traveller can keep chatting about it. */
+  async function openRecent(tripId: string, destId: string) {
     if (busy) return;
-    reset();
-    void start(getDestination(destId).name);
+    setBusy(true);
+    const trip = await loadTrip(tripId);
+    if (!alive.current) return;
+    if (!trip) {
+      // Couldn't load by id (a lingering client-side id from the instant before the
+      // server confirmed one, or the trip's gone) — a fresh start beats a blank screen.
+      setBusy(false);
+      void start(getDestination(destId).name);
+      return;
+    }
+    const history = await loadChatHistory(tripId);
+    if (!alive.current) return;
+    setBlocks(
+      history.map((m) =>
+        m.role === "user" ? { id: nid(), role: "user", text: m.text } : { id: nid(), role: "agent", kind: "text", text: m.text, streaming: false },
+      ),
+    );
+    updatePrefs(trip.prefs);
+    tripIdRef.current = tripId;
+    setPrevPrefs(null);
+    setQIndex(null);
+    setStage(5);
+    setPlanned(true);
+    livePlanStore.set(trip.isLive ? (trip.plan as LivePlan) : null);
+    const d = getDestination(trip.destId);
+    push({ id: nid(), role: "agent", kind: "flights" });
+    push({ id: nid(), role: "agent", kind: "hotels" });
+    push({ id: nid(), role: "agent", kind: "plan" });
+    setSuggestions(withDocSuggestions(trip.prefs, trip.isLive ? liveSuggestions("plan", d.name) : suggestionsFor(buildPlan(trip.prefs), "plan")));
+    setBusy(false);
   }
 
   function reset() {
@@ -995,6 +1070,7 @@ export function Planner() {
                         alternatives={live?.alternatives}
                         onStart={start}
                         lv={lv}
+                        paid={paid}
                       />
                     </div>
                   </li>
@@ -1027,7 +1103,11 @@ export function Planner() {
             <Link href="/trip" className="btn btn-sm">
               View itinerary
             </Link>
-            {live?.syncing ? (
+            {paid ? (
+              <Link href="/booked" className="btn btn-sm btn-ember">
+                <Icon name="check" size={14} /> Paid
+              </Link>
+            ) : live?.syncing ? (
               <button type="button" className="btn btn-sm btn-ember" disabled>
                 Saving…
               </button>
@@ -1274,7 +1354,11 @@ export function Planner() {
                 <Link href="/trip" className="btn btn-ghost btn-sm">
                   Itinerary
                 </Link>
-                {live?.syncing ? (
+                {paid ? (
+                  <Link href="/booked" className="btn btn-ember btn-sm">
+                    <Icon name="check" size={14} /> Paid
+                  </Link>
+                ) : live?.syncing ? (
                   <button type="button" className="btn btn-ember btn-sm" disabled>
                     Saving…
                   </button>
@@ -1312,10 +1396,11 @@ function AgentBlock({
   onStart,
   lv,
   alternatives,
-
+  paid,
 }: {
   lv: LiveView | null;
   alternatives?: AlternativeSlot[];
+  paid: boolean;
 
   block: Exclude<Block, { role: "user" }>;
   prefs: TripPrefs | null;
@@ -1604,9 +1689,15 @@ function AgentBlock({
                 <Icon name="arrow" />
               </span>
             </Link>
-            <Link href="/checkout" className="btn btn-sm btn-ghost">
-              Pay once
-            </Link>
+            {paid ? (
+              <Link href="/booked" className="btn btn-sm btn-ghost">
+                <Icon name="check" size={14} /> Paid
+              </Link>
+            ) : (
+              <Link href="/checkout" className="btn btn-sm btn-ghost">
+                Pay once
+              </Link>
+            )}
           </div>
         </div>
       </article>
