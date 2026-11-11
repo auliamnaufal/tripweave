@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import {
   ApiError,
   CheckoutPaymentIntent,
@@ -9,7 +8,7 @@ import {
   PaypalExperienceUserAction,
   PaypalWalletContextShippingPreference,
 } from "@paypal/paypal-server-sdk";
-import type { ErrorDetails, ItemRequest, Money, Order, PurchaseUnitRequest } from "@paypal/paypal-server-sdk";
+import type { ErrorDetails, ItemRequest, Money, OAuthToken, Order, PurchaseUnitRequest } from "@paypal/paypal-server-sdk";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 
 // Orders, captures and refunds go through PayPal's official Server SDK
@@ -35,6 +34,8 @@ function credentials(): { clientId: string; clientSecret: string } {
 }
 
 let sharedClient: Client | null = null;
+/** The SDK's latest OAuth token, reported by oAuthOnTokenUpdate; reused for webhook verification. */
+let latestToken: OAuthToken | undefined;
 
 /**
  * One SDK client per process: it caches the OAuth token, so building one per
@@ -46,14 +47,24 @@ let sharedClient: Client | null = null;
  * - the SDK's default retry policy (no retries) is kept on purpose: order,
  *   capture and refund are POSTs made safe to repeat by PayPal-Request-Id,
  *   and the caller decides when to repeat them;
- * - SDK logging stays off (its default), so no request body or payer data is logged.
+ * - SDK logging stays off (its default), so no request body or payer data is logged;
+ * - the token is refreshed 60 s before it expires (oAuthClockSkew). The SDK
+ *   never refreshes on a 401, so without a skew a token that expires mid-flight
+ *   fails the call instead of being replaced.
  */
 function paypalClient(): Client {
   if (sharedClient) return sharedClient;
   const { clientId, clientSecret } = credentials();
   sharedClient = new Client({
     environment: isLive() ? Environment.Production : Environment.Sandbox,
-    clientCredentialsAuthCredentials: { oAuthClientId: clientId, oAuthClientSecret: clientSecret },
+    clientCredentialsAuthCredentials: {
+      oAuthClientId: clientId,
+      oAuthClientSecret: clientSecret,
+      oAuthClockSkew: 60,
+      oAuthOnTokenUpdate: (token) => {
+        latestToken = token;
+      },
+    },
     timeout: 30_000,
   });
   return sharedClient;
@@ -62,6 +73,7 @@ function paypalClient(): Client {
 /** Tests only: swap in a client with a stubbed transport, or null to rebuild from env. */
 export function setPayPalClient(client: Client | null): void {
   sharedClient = client;
+  latestToken = undefined;
 }
 
 /** PayPal's error body, as the SDK's CustomError carries it. */
@@ -330,20 +342,20 @@ export function readWebhookHeaders(headers: Headers): WebhookHeaders | null {
 }
 
 // The Server SDK has no webhook operations, so signature verification stays a
-// direct REST call with its own client-credentials token.
+// direct REST call, but with the SDK's own OAuth token: the one orders and
+// captures already use, through the SDK's ClientCredentialsAuthManager, so
+// there is one token source and no hand-rolled Basic-auth exchange.
 async function accessToken(): Promise<string> {
-  const { clientId, clientSecret } = credentials();
-  const response = await fetch(`${baseUrl()}/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  if (!response.ok) throw new Error("PayPal authentication failed.");
-  const token = (await response.json()) as { access_token: string };
-  return token.access_token;
+  const manager = paypalClient().clientCredentialsAuthManager;
+  if (!manager.isValid(latestToken) || manager.isExpired(latestToken)) {
+    try {
+      latestToken = await manager.fetchToken();
+    } catch (error) {
+      logPayPalError("token", error);
+      throw new Error("PayPal authentication failed.");
+    }
+  }
+  return latestToken.accessToken;
 }
 
 /**
@@ -370,6 +382,8 @@ export async function verifyWebhookSignature(
       webhook_id: webhookId,
       webhook_event: webhookEvent,
     }),
+    // Same bound as the SDK client's own calls.
+    signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error("PayPal webhook verification is unavailable.");
   const result = (await response.json()) as { verification_status?: string };
