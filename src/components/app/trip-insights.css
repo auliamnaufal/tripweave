@@ -1,0 +1,159 @@
+/* Trip spend: AG Studio on Tripweave's paper. */
+
+.ti-page {
+  min-height: 100vh;
+  background: var(--paper);
+}
+.ti-wrap {
+  width: min(1320px, 100%);
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+.ti-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 18px;
+}
+.ti-kicker {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.ti-head h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 3.4vw, 2.6rem);
+  line-height: 1.05;
+}
+.ti-sub {
+  max-width: 62ch;
+  margin: 10px 0 0;
+  color: var(--ink-soft);
+}
+.ti-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Studio fills its parent, so the parent carries the height. */
+.ti-canvas {
+  height: max(760px, calc(100vh - 240px));
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.ti-studio {
+  height: 100%;
+}
+.ti-skeleton {
+  height: 100%;
+  background: var(--paper-2);
+}
+.ti-empty {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 32px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 20px;
+  color: var(--ink-soft);
+}
+.ti-empty p {
+  margin: 0;
+  max-width: 52ch;
+}
+
+/* The PayPal money trail widget. */
+.mt-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+.mt-rows {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mt-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 200px) 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+.mt-trip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ink);
+}
+.mt-bar {
+  display: flex;
+  gap: 2px;
+  height: 26px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--paper-2);
+}
+.mt-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4px;
+  color: #fff;
+  font-style: normal;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mt-refunded,
+.mt-pending {
+  color: var(--ink);
+}
+.mt-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.mt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+.mt-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mt-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+@media (max-width: 640px) {
+  .ti-wrap {
+    padding: 20px 16px 40px;
+  }
+  .mt-row {
+    grid-template-columns: 1fr auto;
+  }
+  .mt-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

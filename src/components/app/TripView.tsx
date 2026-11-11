@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
@@ -13,9 +14,18 @@ import { DealPanel } from "@/components/app/DealPanel";
 import { GearPanel } from "@/components/app/GearPanel";
 import { ActivityOptions, EditStatus, LiveOptions } from "@/components/app/LiveOptions";
 import { EditTripDialog } from "@/components/app/EditTrip";
-import { useLivePlan } from "@/features/live/liveStore";
+import { useLivePayment, useLivePlan } from "@/features/live/liveStore";
+import { usePaidBookings } from "@/features/live/usePaidBookings";
 import { syncEdits } from "@/features/live/planEditor";
+import { itineraryTimeline, type TimelineKind } from "@/features/timeline/itineraryTimeline";
 import "./edit-trip.css";
+import "./itinerary-timeline.css";
+
+// Bryntum touches window on import, so the timeline only ever loads in the browser.
+const ItineraryTimeline = dynamic(() => import("@/components/app/ItineraryTimeline"), {
+  ssr: false,
+  loading: () => <div className="trip-timeline-skeleton" aria-busy="true" />,
+});
 
 const kindIcon: Record<string, IconName> = {
   flight: "plane",
@@ -68,15 +78,43 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   // Same (destId, total) pairing Booked.tsx records the order under — this plan
   // was already paid for if an order for it is already in the store.
   const orders = useOrders();
-  const paid = tripPaidFor(orders, view.plan.prefs.destId, total);
-  // Until it's paid, the plan stays editable here: options swap in place, no chat round trip.
   const live = useLivePlan();
+  // The PayPal order Checkout made for exactly this plan (same offer snapshot), if any.
+  const payment = useLivePayment();
+  const paidOrderId = live && payment && payment.planRetrievedAt === (live.plan.offers[0]?.retrievedAt ?? "") ? payment.orderId : undefined;
+  // Booked, failed or refunded per offer, from what the server stored at capture.
+  const paidBookings = usePaidBookings(paidOrderId);
+  const paid = Boolean(paidBookings) || tripPaidFor(orders, view.plan.prefs.destId, total);
+  // Until it's paid, the plan stays editable here: options swap in place, no chat round trip.
   const editable = isLive(view) && !paid && Boolean(live?.quoteId);
   const [openEdit, setOpenEdit] = useState<"flight" | "hotel" | "activity" | null>(null);
   const [editingTrip, setEditingTrip] = useState(false);
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const toggleEdit = (kind: "flight" | "hotel" | "activity") => setOpenEdit((open) => (open === kind ? null : kind));
   const syncing = Boolean(live?.syncing);
+  const timeline = useMemo(
+    () => (live ? itineraryTimeline(live.plan, live.brief.travelWindow, paidBookings?.items) : null),
+    [live, paidBookings],
+  );
+  const refundedMinorUnits = timeline?.bars.reduce((sum, b) => sum + (b.outcome?.state === "refunded" ? b.costMinorUnits : 0), 0) ?? 0;
+  const canSwap = (kind: TimelineKind) =>
+    kind === "activity" ? Boolean(live?.activityOptions?.length) : Boolean(live?.alternatives?.some((slot) => slot.kind === kind));
+  // A bar on the timeline opens the same swap panel as that section's button.
+  const pickFromTimeline = useCallback(
+    (kind: TimelineKind) => {
+      if (!canSwap(kind)) return;
+      setOpenEdit(kind);
+      const target = document.getElementById(kind === "flight" ? "trip-edit-flight-anchor" : kind === "hotel" ? "stay" : "trip-edit-activity-anchor");
+      window.requestAnimationFrame(() => {
+        if (!target) return;
+        if (lenis && !prefersReducedMotion()) lenis.scrollTo(target, { offset: -130, duration: 1.1 });
+        else target.scrollIntoView();
+      });
+    },
+    // canSwap reads live, which is already a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [live, lenis],
+  );
   // A reload in the middle of a save picks the save back up.
   useEffect(() => {
     if (syncing) void syncEdits();
@@ -233,6 +271,39 @@ function TripViewInner({ view }: { view: AnyTripView }) {
         </div>
       </nav>
 
+      {isLive(view) && timeline && timeline.bars.length > 0 && (
+        <section className="app-wrap trip-timeline" aria-label="Trip timeline">
+          <div className="trip-timeline-head">
+            <h3 className="mono">The whole trip at a glance</h3>
+            <p>
+              {paidBookings
+                ? refundedMinorUnits > 0
+                  ? `Paid once with PayPal. ${usd.format(refundedMinorUnits / 100)} came back to your PayPal for what couldn’t be booked.`
+                  : "Paid once with PayPal: every booking is confirmed."
+                : paid
+                ? "Paid with PayPal: every booking is locked in."
+                : editable
+                  ? "Hover or tap a booking for details; click it to swap it before you pay."
+                  : "Hover or tap a booking for details."}
+            </p>
+          </div>
+          <ItineraryTimeline model={timeline} paid={paid} onPick={editable ? pickFromTimeline : undefined}
+            pickable={(["flight", "hotel", "activity"] as const).filter(canSwap)}
+          />
+          <ul className="trip-timeline-legend">
+            <li><i style={{ background: "var(--forest-700)" }} /> Flight</li>
+            <li><i style={{ background: "var(--sand)" }} /> Stay</li>
+            <li><i style={{ background: "var(--ember)" }} /> Things to do</li>
+            {timeline.bars.some((b) => b.flags.length > 0) && (
+              <li><i style={{ background: "#b42318" }} /> Clashes or falls outside your dates</li>
+            )}
+            {refundedMinorUnits > 0 && (
+              <li><i className="trip-timeline-refunded-swatch" /> Refunded to your PayPal</li>
+            )}
+          </ul>
+        </section>
+      )}
+
       <div className="app-wrap trip-grid">
         <div className="trip-main">
           <section id="itinerary" className="trip-section">
@@ -276,7 +347,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
           </section>
 
           <section id="flights" className="trip-section">
-            <div className="trip-h2-row">
+            <div className="trip-h2-row" id="trip-edit-flight-anchor">
               <h2 className="trip-h2 display">Flights</h2>
               {editable && live?.alternatives?.some((slot) => slot.kind === "flight") && (
                 <button type="button" className="trip-edit-toggle" aria-expanded={openEdit === "flight"} aria-controls="trip-edit-flight" onClick={() => toggleEdit("flight")}>
@@ -381,7 +452,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
             </div>
             {editable && Boolean(live?.activityOptions?.length) && (
               <>
-                <div className="trip-h2-row" style={{ marginTop: 18 }}>
+                <div className="trip-h2-row" id="trip-edit-activity-anchor" style={{ marginTop: 18 }}>
                   <button type="button" className="trip-edit-toggle" style={{ marginLeft: 0 }} aria-expanded={openEdit === "activity"} aria-controls="trip-edit-activity" onClick={() => toggleEdit("activity")}>
                     <Icon name="compass" size={14} /> {openEdit === "activity" ? "Done" : "Add or remove things to do"}
                   </button>

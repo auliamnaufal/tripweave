@@ -16,6 +16,11 @@ export function createKitCache<T>(options: { ttlMs?: number; maxEntries?: number
   const entries = new Map<string, Entry<T>>();
 
   return {
+    /** The cached kit for `key` if one is fresh, without building one. */
+    peek(key: string): Promise<T> | undefined {
+      const hit = entries.get(key);
+      return hit && now() - hit.at < ttl ? hit.value : undefined;
+    },
     /**
      * The cached kit for `key`, or `build()`'s. Concurrent callers share one
      * in-flight build; a failed build is dropped so the next call retries.

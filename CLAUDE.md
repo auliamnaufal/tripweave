@@ -35,3 +35,8 @@ Handler conventions.
 **API routes**: every route under `src/app/api/` validates its body with a zod schema inside a try/catch before doing anything else, returning a 4xx on parse failure — follow this shape for new routes rather than inventing a different validation style. Routes needing a signed-in user call `authedUser()` (`src/lib/supabase/authedUser.ts`); routes that must write on the traveler's behalf with no session to scope to (e.g. the capture route's order-receipt insert) use `createAdminClient()` (`src/lib/supabase/admin.ts`), which bypasses Supabase RLS on purpose — don't reach for it outside that specific case.
 
 **Supabase schema** (`supabase/migrations/0001_init.sql`): every table is owned by `user_id` and RLS-locked to that owner; there is no separate migration tool wired up, so schema changes mean hand-editing/adding a migration file and applying it directly against the project's Postgres instance.
+
+<!-- claude-reflect: learned rules (saved from the band; edit freely) -->
+## Learned rules
+- Deploy and configure this project on Heroku only; do not reference Render for env vars or deployment steps.
+<!-- end claude-reflect -->

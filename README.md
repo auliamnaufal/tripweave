@@ -31,6 +31,21 @@ Type the trip the way you'd say it ("Japan, 2 people: Tokyo day 1, Osaka day 2, 
 
 Under a live plan, "Find gear" (`POST /api/gear`) suggests a few things worth buying for *this* trip. The model only names what to look for (a rain jacket for Tokyo in June, boots for a Mount Fuji day); code splits what's left under the budget into a per-item cap, and [Channel3](https://trychannel3.com) searches real US retailers for in-stock products at or under it. Each product links to its retailer (`rel="sponsored"`, with the commission disclosure). Gear is bought from the retailer, never added to the Trip Order or its PayPal payment. Off while `CHANNEL3_API_KEY` is empty.
 
+Each pick has **More like this** (`POST /api/gear/similar`): Channel3's `/v1/similar` finds the closest products to it, held to the same per-item cap. The cap is read from the server's cached kit for that quote (or, if the kit has expired, the smallest cap a kit could have), never from the browser, so alternatives can't push gear past the budget.
+
+### The whole trip at a glance (Bryntum Scheduler)
+
+`/trip` opens with a [Bryntum Scheduler](https://bryntum.com/products/scheduler/) timeline: one row each for flights, stay and things to do, one bar per offer at its local time, the travel dates shaded. Bars only show what the planner already decided: a schedule conflict or an offer outside the trip window (from `build_itinerary`'s violations) is striped red, with what it clashes with in the tooltip. Bars don't drag, because times come from the suppliers.
+
+- Before payment, clicking a bar opens the swap panel for that kind (the same instant edits as the Change buttons).
+- After payment, each bar shows what its booking became, read from what capture stored (`/api/tickets`, the same source as the e-tickets): ✓ booked with its reference, or ↺ refunded to the traveller's PayPal (struck through, with the supplier's reason). The heading says how much came back.
+
+### Trip spend (AG Studio)
+
+`/insights` is an [AG Studio](https://www.ag-grid.com/studio/) dashboard of every Trip Order the traveller paid with PayPal, built only from `plan_quotes` + `bookings` as stored at capture: paid / booked / refunded KPIs, spend by kind and by platform and outcome, every line with its booking reference, and a custom **PayPal money trail** widget: one bar per Trip Order, split into booked, pending, failed and refunded, so a refund reads as part of the same payment.
+
+In edit mode, Studio's AI agents work through a Tripweave adapter (`src/features/insights/ai/responsesAdapter.ts`) that speaks the OpenAI Responses API via `POST /api/ai/responses`, a signed-in-only proxy that holds the key, pins `OPENAI_MODEL` and caps each turn. The team is Studio's built-in agents plus a custom **Trip Order auditor**: the built-in lead can hand off to it, it reads the orders through a `reconcile_trip_orders` tool whose numbers are computed in code (paid = booked + refunded + pending, to the cent), and it hands dashboard edits back to the built-in page and widget agents. Without `AG_STUDIO_LICENSE_KEY` Studio runs as a trial with a watermark.
+
 ## How it works
 
 ```
@@ -89,6 +104,7 @@ Orders v2, following PayPal's current guide:
 - `INSTRUMENT_DECLINED` on capture sends the buyer back to PayPal; nothing was captured.
 - Onboarded Suppliers (a hotel or activity vendor that shared its PayPal email) get their own purchase unit and `payee` on the same order. Flights never do.
 - Webhooks: `POST /api/webhooks/paypal` verifies each delivery with PayPal (`verify-webhook-signature`), records it once by event id, and acts on `PAYMENT.CAPTURE.*`.
+- Everything above goes through PayPal's APIMatic-generated Server SDK (`@paypal/paypal-server-sdk`, pinned). Webhook verification, which the SDK has no operation for, still takes its OAuth token from the SDK's `ClientCredentialsAuthManager`, and the client refreshes tokens 60 s early (`oAuthClockSkew`) because the SDK never refreshes on a 401. Both changes came from the [APIMatic Context Plugin for PayPal](https://github.com/paypaldev/server-sdk-context-plugin-preview), whose TypeScript skills were used to review this integration against the SDK's own source.
 
 ## Run locally
 
@@ -99,7 +115,7 @@ Orders v2, following PayPal's current guide:
    - `DUFFEL_API_KEY`: free test-mode account at [duffel.com](https://duffel.com)
    - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`: a sandbox REST app at [developer.paypal.com](https://developer.paypal.com)
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`
-   - Optional: `LITEAPI_KEY`, `TRAVELPAYOUTS_TOKEN`/`TRAVELPAYOUTS_MARKER`, `CHANNEL3_API_KEY` (each feature is off while its key is empty)
+   - Optional: `LITEAPI_KEY`, `TRAVELPAYOUTS_TOKEN`/`TRAVELPAYOUTS_MARKER`, `CHANNEL3_API_KEY` (each feature is off while its key is empty), `AG_STUDIO_LICENSE_KEY` (Trip spend runs as a watermarked trial without it)
 4. Apply `supabase/migrations/*.sql` in order (Supabase SQL editor, or `supabase db push`).
 5. `pnpm dev`, then open `http://localhost:3000`.
 
@@ -109,16 +125,15 @@ To pay in sandbox, log in on PayPal's page with a **sandbox personal** account f
 
 `DEMO_MODE=true` makes the earliest activity fail to book every time, so the partial refund shows reliably: the row turns "refunded" in `/booked` and the refund appears on the sandbox capture. It also lets `/lab` route one non-flight offer to a hand-entered sandbox payee. Keep it `false` anywhere else.
 
-## Deploy (Render)
+## Deploy (Heroku)
 
-`render.yaml` is a Render Blueprint: one Node 22 web service that builds with pnpm (via Corepack, pinned by `packageManager`) and runs `next start` on Render's `PORT`.
+One web dyno: `Procfile` runs `next start` on Heroku's `PORT`. The Node buildpack takes Node 22 from `engines`, installs pnpm through Corepack from `packageManager`, and runs `pnpm build`.
 
-1. In Render: **New → Blueprint**, pick this repo. Render asks once for every `sync: false` value; fill them from `.env.example`.
-2. When the service is up, set `APP_BASE_URL` to its URL (e.g. `https://tripweave.onrender.com`). PayPal's `return_url` / `cancel_url` are built from it.
-3. In the PayPal sandbox app → **Webhooks**, add `<APP_BASE_URL>/api/webhooks/paypal` with the events `PAYMENT.CAPTURE.COMPLETED`, `PENDING`, `DENIED`, `DECLINED`, `REVERSED` and `REFUNDED`, then put the webhook id in `PAYPAL_WEBHOOK_ID`.
-4. Optional: `NEXT_PUBLIC_PAYPAL_SANDBOX_BUYER_EMAIL` / `_PASSWORD` show a sandbox buyer login at checkout. They are compiled into the page, so redeploy after setting them.
-
-The free plan sleeps after 15 idle minutes and takes about a minute to wake; `plan: starter` avoids that for a judged demo.
+1. `heroku create <app-name>`, then `git push heroku master` (or connect the GitHub repo under **Deploy** and turn on automatic deploys from `master`).
+2. Set every value from `.env.example` as a config var: `heroku config:set KEY=value ... -a <app-name>`, or **Settings → Config Vars**.
+3. Set `APP_BASE_URL` to the app's URL (e.g. `https://<app-name>.herokuapp.com`). PayPal's `return_url` / `cancel_url` are built from it.
+4. In the PayPal sandbox app → **Webhooks**, add `<APP_BASE_URL>/api/webhooks/paypal` with the events `PAYMENT.CAPTURE.COMPLETED`, `PENDING`, `DENIED`, `DECLINED`, `REVERSED` and `REFUNDED`, then put the webhook id in `PAYPAL_WEBHOOK_ID`.
+5. Optional: `NEXT_PUBLIC_PAYPAL_SANDBOX_BUYER_EMAIL` / `_PASSWORD` show a sandbox buyer login at checkout. They are compiled into the page at build time, so redeploy after setting them.
 
 ## Limits
 

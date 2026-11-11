@@ -146,6 +146,19 @@ export async function fetchGearKit(quoteId: string): Promise<GearKitResult> {
   return (await response.json()) as GearKitResult;
 }
 
+export type SimilarGearResult = { products: GearKit["items"][number]["products"]; capMinorUnits: number; disclosure: string };
+
+/** Channel3 products like one gear pick, at or under the same per-item cap (set by the server). */
+export async function fetchSimilarGear(quoteId: string, productId: string): Promise<SimilarGearResult> {
+  const response = await fetch("/api/gear/similar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quoteId, productId }),
+  });
+  if (!response.ok) throw new Error(await errorText(response, "I couldn’t find anything similar."));
+  return (await response.json()) as SimilarGearResult;
+}
+
 /** The intake agent: free text in, a validated brief (or one clarifying question) out. */
 export async function readTrip(
   text: string,

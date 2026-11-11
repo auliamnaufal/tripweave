@@ -8,7 +8,7 @@ import { NextResponse, type NextRequest } from "next/server";
 //    never lands on the sign-in page again.
 
 /** Pages that need an account. APIs check auth themselves; PayPal's return page must always load. */
-const PROTECTED = ["/plan", "/trip", "/checkout", "/booked", "/account", "/tickets"];
+const PROTECTED = ["/plan", "/trip", "/checkout", "/booked", "/account", "/tickets", "/insights"];
 const OPEN = ["/checkout/return"];
 
 export function needsAccount(pathname: string): boolean {

@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/brand/Icon";
-import { fetchGearKit, type GearKitResult } from "@/features/live/client";
+import { fetchGearKit, fetchSimilarGear, type GearKitResult, type SimilarGearResult } from "@/features/live/client";
 import "./gear.css";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const usd = (minor: number) => money.format(minor / 100);
+
+type Product = GearKitResult["items"][number]["products"][number];
+type Similar = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; result: SimilarGearResult };
 
 type State = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; kit: GearKitResult };
 
@@ -18,6 +21,21 @@ type State = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: 
  */
 export function GearPanel({ quoteId }: { quoteId: string }) {
   const [state, setState] = useState<State>({ kind: "idle" });
+  // "More like this", per product: Channel3 /v1/similar under the same cap.
+  const [similar, setSimilar] = useState<Record<string, Similar>>({});
+  const [openSimilar, setOpenSimilar] = useState<string | null>(null);
+
+  async function moreLike(product: Product) {
+    setOpenSimilar((open) => (open === product.id ? null : product.id));
+    if (similar[product.id]?.kind === "ready" || similar[product.id]?.kind === "loading") return;
+    setSimilar((all) => ({ ...all, [product.id]: { kind: "loading" } }));
+    try {
+      const result = await fetchSimilarGear(quoteId, product.id);
+      setSimilar((all) => ({ ...all, [product.id]: { kind: "ready", result } }));
+    } catch (error) {
+      setSimilar((all) => ({ ...all, [product.id]: { kind: "error", message: error instanceof Error ? error.message : "I couldn’t find anything similar." } }));
+    }
+  }
 
   async function load() {
     setState({ kind: "loading" });
@@ -95,9 +113,21 @@ export function GearPanel({ quoteId }: { quoteId: string }) {
                             </span>
                           </span>
                         </a>
+                        <button
+                          type="button"
+                          className="gear-more"
+                          aria-expanded={openSimilar === product.id}
+                          aria-controls={`gear-similar-${product.id}`}
+                          onClick={() => void moreLike(product)}
+                        >
+                          {openSimilar === product.id ? "Hide similar" : "More like this"}
+                        </button>
                       </li>
                     ))}
                   </ul>
+                )}
+                {products.map((product) =>
+                  openSimilar === product.id ? <SimilarList key={product.id} product={product} state={similar[product.id]} /> : null,
                 )}
               </li>
             ))}
@@ -110,5 +140,46 @@ export function GearPanel({ quoteId }: { quoteId: string }) {
         </>
       )}
     </section>
+  );
+}
+
+function SimilarList({ product, state }: { product: Product; state: Similar | undefined }) {
+  return (
+    <div id={`gear-similar-${product.id}`} className="gear-similar" aria-live="polite" aria-busy={state?.kind === "loading"}>
+      <p className="gear-similar-head">Like “{product.title}”, still within {state?.kind === "ready" ? usd(state.result.capMinorUnits) : "your cap"}</p>
+      {(!state || state.kind === "loading") && <p className="gear-fine">Asking Channel3 for close matches…</p>}
+      {state?.kind === "error" && (
+        <p className="gear-fine is-error" role="alert">
+          {state.message}
+        </p>
+      )}
+      {state?.kind === "ready" &&
+        (state.result.products.length === 0 ? (
+          <p className="gear-fine">Nothing close to it in stock within the cap.</p>
+        ) : (
+          <ul className="gear-products">
+            {state.result.products.map((alt) => (
+              <li key={alt.url}>
+                <a className="gear-product" href={alt.url} target="_blank" rel="noopener noreferrer sponsored">
+                  {alt.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={alt.imageUrl} alt="" loading="lazy" />
+                  ) : (
+                    <span className="gear-noimg" aria-hidden="true" />
+                  )}
+                  <span className="gear-product-text">
+                    <span className="gear-product-title">{alt.title}</span>
+                    <span className="gear-product-meta">
+                      <b>{usd(alt.priceMinorUnits)}</b>
+                      {alt.compareAtMinorUnits && <s>{usd(alt.compareAtMinorUnits)}</s>} · {alt.domain}
+                    </span>
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        ))}
+      {state?.kind === "ready" && state.result.products.length > 0 && <p className="gear-fine">{state.result.disclosure}</p>}
+    </div>
   );
 }

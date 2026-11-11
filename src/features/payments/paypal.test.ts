@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client, Environment } from "@paypal/paypal-server-sdk";
-import { capturePlanOrder, createPlanOrder, refundCapture, setPayPalClient } from "./paypal";
+import { capturePlanOrder, createPlanOrder, refundCapture, setPayPalClient, verifyWebhookSignature } from "./paypal";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 
@@ -382,5 +382,36 @@ describe("createPlanOrder malformed replies", () => {
   it("refuses an order response with no status instead of assuming CREATED", async () => {
     reply({ id: "o", links: [{ rel: "payer-action", href: "x" }] });
     await expect(createPlanOrder([offer("hotel-main", 95000)])).rejects.toThrow("PayPal order returned no status.");
+  });
+});
+
+describe("verifyWebhookSignature", () => {
+  const headers = { transmissionId: "t", transmissionTime: "now", transmissionSig: "sig", certUrl: "https://api.paypal.com/cert", authAlgo: "SHA256withRSA" };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("gets its token through the SDK's auth manager, then asks PayPal to verify", async () => {
+    // The seeded client token isn't visible to us, so the manager fetches one through the SDK transport.
+    reply({ access_token: "sdk-token", token_type: "Bearer", expires_in: 32400 });
+    const fetchStub = vi.fn(async () => Response.json({ verification_status: "SUCCESS" }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    await expect(verifyWebhookSignature(headers, { id: "WH-1" }, "hook")).resolves.toBe(true);
+
+    expect(requests[0].url).toContain("/v1/oauth2/token");
+    const [url, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api-m.sandbox.paypal.com/v1/notifications/verify-webhook-signature");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer sdk-token");
+    expect(JSON.parse(init.body as string)).toMatchObject({ webhook_id: "hook", transmission_id: "t", webhook_event: { id: "WH-1" } });
+
+    // A second delivery reuses the cached token: no new token request.
+    await verifyWebhookSignature(headers, { id: "WH-2" }, "hook");
+    expect(requests).toHaveLength(1);
+  });
+
+  it("reports anything but SUCCESS as not genuine", async () => {
+    reply({ access_token: "sdk-token", token_type: "Bearer", expires_in: 32400 });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ verification_status: "FAILURE" })));
+    await expect(verifyWebhookSignature(headers, {}, "hook")).resolves.toBe(false);
   });
 });

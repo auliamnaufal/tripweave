@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatOpenAI } from "@langchain/openai";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { parseTripBrief } from "@/features/planner/tripBrief";
-import { Channel3Error, searchGear, toGearProduct } from "./channel3";
+import { Channel3Error, searchGear, similarGear, toGearProduct } from "./channel3";
 import { buildGearKit, FALLBACK_NEEDS, gearNeeds, gearRoom } from "./gearKit";
 
 const brief = parseTripBrief({
@@ -95,6 +95,29 @@ describe("searchGear", () => {
     const fetchStub = async () => new Response(JSON.stringify({ detail: "out of credits" }), { status: 402 });
     vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(searchGear("x", 1000, { apiKey: "k", fetch: fetchStub as unknown as typeof fetch })).rejects.toMatchObject({ name: "Channel3Error", status: 402 });
+  });
+});
+
+describe("similarGear", () => {
+  it("asks /v1/similar under the same cap and leaves out the product it started from", async () => {
+    const fetchStub = vi.fn(async () =>
+      Response.json({ products: [product(), product({ id: "p2", offers: [{ ...product().offers[0], url: "https://shop-a.example.com/2" }] })] }),
+    );
+
+    const found = await similarGear("p1", 10_000, { apiKey: "k", fetch: fetchStub as unknown as typeof fetch });
+
+    expect(found.map((p) => p.id)).toEqual(["p2"]);
+    const [url, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.trychannel3.com/v1/similar");
+    expect(new Headers(init.headers).get("x-api-key")).toBe("k");
+    expect(JSON.parse(init.body as string)).toEqual({ product_id: "p1", limit: 10, filters: { price: { max_price: 100 } } });
+  });
+
+  it("drops anything over the cap even if Channel3 returns it", async () => {
+    const pricey = product({ id: "p9", offers: [{ ...product().offers[0], url: "https://shop-a.example.com/9", price: { price: 500, currency: "USD" } }] });
+    const fetchStub = async () => Response.json({ products: [pricey] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await similarGear("p1", 10_000, { apiKey: "k", fetch: fetchStub as unknown as typeof fetch })).toEqual([]);
   });
 });
 

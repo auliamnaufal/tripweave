@@ -1,3 +1,5 @@
 ignoredBuiltDependencies:
+  - "@bryntum/scheduler-trial"
+  - "@bryntum/scheduler-trial-lib"
   - sharp
   - unrs-resolver

@@ -167,3 +167,33 @@
 .gear-product-meta s {
   margin-left: 6px;
 }
+
+/* "More like this" (Channel3 /v1/similar). */
+.gear-more {
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.gear-more:hover,
+.gear-more[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.gear-similar {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+.gear-similar-head {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+}

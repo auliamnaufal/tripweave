@@ -12,6 +12,7 @@ const LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: "/plan", label: "Planner", icon: "chat" },
   { href: "/account?tab=trips", label: "My trips", icon: "map" },
   { href: "/tickets", label: "E-tickets", icon: "ticket" },
+  { href: "/insights", label: "Trip spend", icon: "wallet" },
   { href: "/account?tab=payments", label: "Receipts", icon: "wallet" },
   { href: "/account", label: "Account settings", icon: "user" },
 ];

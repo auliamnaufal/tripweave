@@ -6,6 +6,7 @@ import { z } from "zod";
 // payment. Without CHANNEL3_API_KEY the feature is simply off.
 
 const SEARCH_URL = "https://api.trychannel3.com/v1/search";
+const SIMILAR_URL = "https://api.trychannel3.com/v1/similar";
 
 /** Shown wherever Channel3 links are, as Channel3's terms require. */
 export const AFFILIATE_DISCLOSURE = "We may earn a commission when you buy through links on this page.";
@@ -123,6 +124,41 @@ export async function searchGear(
     throw new Channel3Error(`Channel3 search failed (${response.status}).`, response.status);
   }
   const body = searchResponseSchema.parse(await response.json());
+  return pickProducts(body.products, capMinorUnits, { limit: deps.limit ?? 3, context: { query } });
+}
+
+/**
+ * Products Channel3 ranks closest to one it returned before (/v1/similar),
+ * held to the same cap: "more like this" for a gear pick, never pricier than
+ * the kit allows. The source product itself is left out.
+ */
+export async function similarGear(
+  productId: string,
+  capMinorUnits: number,
+  deps: { apiKey?: string; fetch?: typeof fetch; limit?: number } = {},
+): Promise<GearProduct[]> {
+  const apiKey = deps.apiKey ?? process.env.CHANNEL3_API_KEY;
+  if (!apiKey) throw new Channel3Error("CHANNEL3_API_KEY is not configured.", 503);
+  const response = await (deps.fetch ?? fetch)(SIMILAR_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+    // Documented similar filters: gender, brand, category, price. Stock and
+    // currency are checked per offer in toGearProduct instead.
+    body: JSON.stringify({ product_id: productId, limit: 10, filters: { price: { max_price: capMinorUnits / 100 } } }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    console.error("Channel3 similar failed", response.status, await response.text().catch(() => ""));
+    throw new Channel3Error(`Channel3 similar failed (${response.status}).`, response.status);
+  }
+  const body = searchResponseSchema.parse(await response.json());
+  const others = body.products.filter((raw) => (raw as { id?: unknown } | null)?.id !== productId);
+  return pickProducts(others, capMinorUnits, { limit: deps.limit ?? 3, context: { productId } });
+}
+
+/** Channel3 products → the buyable ones within the cap, one per retailer link, up to `limit`. */
+function pickProducts(raws: readonly unknown[], capMinorUnits: number, options: { limit: number; context: Record<string, string> }): GearProduct[] {
+  const body = { products: raws };
   const seen = new Set<string>();
   const products: GearProduct[] = [];
   let unparsed = 0;
@@ -137,15 +173,15 @@ export async function searchGear(
     if (!product || seen.has(product.url)) continue;
     seen.add(product.url);
     products.push(product);
-    if (products.length === (deps.limit ?? 3)) break;
+    if (products.length === options.limit) break;
   }
   if (unparsed > 0) {
-    console.warn(`Channel3: ${unparsed} of ${body.products.length} products didn't match the expected shape`, { query });
+    console.warn(`Channel3: ${unparsed} of ${body.products.length} products didn't match the expected shape`, options.context);
   }
   if (body.products.length > 0 && products.length === 0) {
     // Channel3 already filtered to in-stock items under the cap, so every one
     // being dropped here points at availability/price/currency being read wrong.
-    console.warn(`Channel3 returned ${body.products.length} products but none passed our filters`, { query, capMinorUnits });
+    console.warn(`Channel3 returned ${body.products.length} products but none passed our filters`, { ...options.context, capMinorUnits });
   }
   return products;
 }
