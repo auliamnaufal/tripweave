@@ -10,6 +10,7 @@ import { savedStore, useHydrated, useOrders, useSaved } from "@/features/ui-mock
 import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 import { DealPanel } from "@/components/app/DealPanel";
+import { GearPanel } from "@/components/app/GearPanel";
 
 const kindIcon: Record<string, IconName> = {
   flight: "plane",
@@ -331,6 +332,11 @@ function TripViewInner({ view }: { view: AnyTripView }) {
               ))}
             </div>
           </section>
+          {isLive(view) && view.quoteId && (
+            <section id="gear" className="trip-section">
+              <GearPanel quoteId={view.quoteId} />
+            </section>
+          )}
         </div>
 
         <aside id="budget" className="trip-side">

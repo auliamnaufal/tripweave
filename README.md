@@ -8,7 +8,7 @@ Partnerships, not scraping: Tripweave only reaches platforms through their own p
 
 | | |
 |---|---|
-| Real | Duffel airline fares (test mode) and repricing · LiteAPI hotel rates, prebook and **sandbox bookings** · Aviasales market fares via **Travelpayouts** (the demo's live partner integration, with affiliate links) · PayPal sandbox order, capture, refunds and webhooks · the agent's tool calls |
+| Real | Duffel airline fares (test mode) and repricing · LiteAPI hotel rates, prebook and **sandbox bookings** · Aviasales market fares via **Travelpayouts** (the demo's live partner integration, with affiliate links) · PayPal sandbox order, capture, refunds and webhooks · retailer products for the gear kit via **Channel3** · the agent's tool calls |
 | Simulated | OTA partners **Nusantara Trips** and **SkyBazaar**, standing in for B2B partners such as Traveloka Partners Network or tiket.com B2B. They resell the same real Duffel and LiteAPI inventory at their own prices and terms, so the comparison is product-for-product. Their bookings and airline ticketing return `SIM-…` references |
 
 Deterministic code, not the model, owns every price, total and booking.
@@ -26,6 +26,10 @@ Type the trip the way you'd say it ("Japan, 2 people: Tokyo day 1, Osaka day 2, 
 1. `searchCatalog` queries every platform in parallel and keeps each product at its cheapest bookable platform.
 2. The agent searches, calls `compare_platforms` (what each platform charges for the exact products it's considering, with terms), calls `check_market` (Aviasales fares on the same route and the cheapest day within a week), then `build_itinerary` until the selection fits.
 3. The server computes the deal summary from the search itself, not from the model: platforms searched, offers compared, what each item saved against the priciest platform, and date tips. `/trip` shows it in the "Deal hunt" panel, with simulated partners labelled.
+
+### Pack for it (Channel3)
+
+Under a live plan, "Find gear" (`POST /api/gear`) suggests a few things worth buying for *this* trip. The model only names what to look for (a rain jacket for Tokyo in June, boots for a Mount Fuji day); code splits what's left under the budget into a per-item cap, and [Channel3](https://trychannel3.com) searches real US retailers for in-stock products at or under it. Each product links to its retailer (`rel="sponsored"`, with the commission disclosure). Gear is bought from the retailer, never added to the Trip Order or its PayPal payment. Off while `CHANNEL3_API_KEY` is empty.
 
 ## How it works
 
@@ -95,6 +99,7 @@ Orders v2, following PayPal's current guide:
    - `DUFFEL_API_KEY`: free test-mode account at [duffel.com](https://duffel.com)
    - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`: a sandbox REST app at [developer.paypal.com](https://developer.paypal.com)
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`
+   - Optional: `LITEAPI_KEY`, `TRAVELPAYOUTS_TOKEN`/`TRAVELPAYOUTS_MARKER`, `CHANNEL3_API_KEY` (each feature is off while its key is empty)
 4. Apply `supabase/migrations/*.sql` in order (Supabase SQL editor, or `supabase db push`).
 5. `pnpm dev`, then open `http://localhost:3000`.
 
