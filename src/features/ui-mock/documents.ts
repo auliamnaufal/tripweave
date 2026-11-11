@@ -8,6 +8,8 @@ export type DocKind = "passport" | "id" | "visa" | "insurance";
 export type TravelDoc = {
   id: string;
   kind: DocKind;
+  /** Which traveler this document belongs to (0-based). A trip with N travelers needs its own passport/visa/ID per traveler. */
+  travelerIndex: number;
   holder: string;
   last4: string;
   issuer: string;
@@ -36,7 +38,7 @@ export const docMeta: Record<DocKind, { label: string; short: string; hint: stri
 export const docKinds = Object.keys(docMeta) as DocKind[];
 
 export type Need = "required" | "check" | "recommended";
-export type Requirement = { kind: DocKind; need: Need; why: string };
+export type Requirement = { kind: DocKind; need: Need; why: string; travelerIndex: number };
 export type ReqStatus = "ok" | "missing" | "expiring" | "expired";
 
 const entryNotes: Record<string, string> = {
@@ -65,14 +67,19 @@ export function isDomestic(prefs: TripPrefs): boolean {
   return (prefs.destId === "oahu" && country === "United States") || (prefs.destId === "bali" && country === "Indonesia");
 }
 
+/** One requirement per traveler for document kinds each person must hold individually. */
+function perTraveler(prefs: TripPrefs, kind: DocKind, need: Need, why: string): Requirement[] {
+  return Array.from({ length: Math.max(1, prefs.travelers) }, (_, travelerIndex) => ({ kind, need, why, travelerIndex }));
+}
+
 export function requirementsFor(prefs: TripPrefs): Requirement[] {
-  const insurance: Requirement = { kind: "insurance", need: "recommended", why: "Not required to book, but covers delays, cancellations and medical costs abroad." };
+  const insurance: Requirement = { kind: "insurance", need: "recommended", why: "Not required to book, but covers delays, cancellations and medical costs abroad.", travelerIndex: 0 };
   if (isDomestic(prefs)) {
-    return [{ kind: "id", need: "required", why: "Domestic flight. The airline checks a government photo ID at check-in." }, insurance];
+    return [...perTraveler(prefs, "id", "required", "Domestic flight. The airline checks a government photo ID at check-in."), insurance];
   }
   return [
-    { kind: "passport", need: "required", why: "Airlines and hotels need it at booking. It should be valid 6 months past your return." },
-    { kind: "visa", need: "check", why: entryNotes[prefs.destId] ?? "Entry rules depend on your passport. Check before you book." },
+    ...perTraveler(prefs, "passport", "required", "Airlines and hotels need it at booking. It should be valid 6 months past your return."),
+    ...perTraveler(prefs, "visa", "check", entryNotes[prefs.destId] ?? "Entry rules depend on your passport. Check before you book."),
     insurance,
   ];
 }
@@ -93,15 +100,15 @@ export function docStatus(doc: TravelDoc, prefs: TripPrefs | null, now = Date.no
   return exp < end + buffer ? "expiring" : "ok";
 }
 
-export function findDoc(docs: TravelDoc[], kind: DocKind): TravelDoc | undefined {
-  return docs.find((d) => d.kind === kind);
+export function findDoc(docs: TravelDoc[], kind: DocKind, travelerIndex = 0): TravelDoc | undefined {
+  return docs.find((d) => d.kind === kind && d.travelerIndex === travelerIndex);
 }
 
 export type Readiness = { req: Requirement; doc?: TravelDoc; status: ReqStatus };
 
 export function readiness(prefs: TripPrefs, docs: TravelDoc[]): Readiness[] {
   return requirementsFor(prefs).map((req) => {
-    const doc = findDoc(docs, req.kind);
+    const doc = findDoc(docs, req.kind, req.travelerIndex);
     return { req, doc, status: doc ? docStatus(doc, prefs) : "missing" };
   });
 }
@@ -132,14 +139,16 @@ const addYears = (n: number, now: number) => new Date(now + n * 365 * DAY).toISO
  * Stand-in for document OCR. The real version reads the MRZ / fields server side;
  * the demo fills sample values the traveller can correct in Account → Documents.
  */
-export function readDocument(input: { kind: DocKind; fileName: string; fileSize: number; holder: string; prefs: TripPrefs | null; source: TravelDoc["source"] }, now = Date.now()): TravelDoc {
+export function readDocument(input: { kind: DocKind; fileName: string; fileSize: number; holder: string; prefs: TripPrefs | null; source: TravelDoc["source"]; travelerIndex?: number }, now = Date.now()): TravelDoc {
   const { kind, prefs } = input;
+  const travelerIndex = input.travelerIndex ?? 0;
   const issuer = kind === "visa" && prefs ? getDestination(prefs.destId).country.split(", ").pop()! : (originCountry[prefs?.origin ?? origins[0].city] ?? "United States");
   const expires =
     kind === "passport" ? addYears(6 + Math.floor(Math.random() * 3), now) : kind === "id" ? addYears(4, now) : kind === "visa" ? addYears(1, now) : prefs ? new Date(tripEnd(prefs, now).getTime() + 30 * DAY).toISOString().slice(0, 10) : addYears(1, now);
   return {
-    id: `${kind}-${now.toString(36)}`,
+    id: `${kind}-${travelerIndex}-${now.toString(36)}`,
     kind,
+    travelerIndex,
     holder: input.holder,
     last4: String(1000 + Math.floor(Math.random() * 9000)),
     issuer,
@@ -152,7 +161,7 @@ export function readDocument(input: { kind: DocKind; fileName: string; fileSize:
 }
 
 export function upsertDoc(docs: TravelDoc[], doc: TravelDoc): TravelDoc[] {
-  return [doc, ...docs.filter((d) => d.kind !== doc.kind)];
+  return [doc, ...docs.filter((d) => !(d.kind === doc.kind && d.travelerIndex === doc.travelerIndex))];
 }
 
 export const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });

@@ -8,9 +8,8 @@ import { DocumentsPanel } from "@/components/app/TravelDocs";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
 import { destinations, getDestination } from "@/features/ui-mock/destinations";
-import { useTripView } from "@/features/live/useTripView";
 import { tabKeys } from "@/components/app/tabKeys";
-import type { Order } from "@/features/ui-mock/tripStore";
+import { mergeTripRows, type Order } from "@/features/ui-mock/tripStore";
 import {
   historyStore,
   ordersStore,
@@ -77,7 +76,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
   const history = useHistory();
   const orders = useOrders();
   const saved = useSaved();
-  const current = useTripView();
+  const trips = mergeTripRows(history, orders);
   const [undo, setUndo] = useState<{ label: string; restore: () => void } | null>(null);
   const [picked, setPicked] = useState<string[]>(prefs.vibes.length ? prefs.vibes : ["Slow mornings", "Food first"]);
   const [diet, setDiet] = useState("No restrictions");
@@ -200,56 +199,39 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
           )}
           {tab === "trips" && (
             <>
-              {history.length > 0 && (
-              <>
-              <h2 className="ac-h2">Current plan</h2>
-              <article className="ac-trip ac-trip-current">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={current.hero} alt="" />
-                <div className="ac-trip-body">
-                  <span className={`ac-status ${orders.some((o) => o.destId === prefs.destId) ? "is-booked" : ""}`}>
-                    {orders.some((o) => o.destId === prefs.destId) ? "Booked" : "Planned, not paid"}
-                  </span>
-                  <h3>{current.title}</h3>
-                  <p>
-                    {current.dates} · {current.travelers} {current.travelers === 1 ? "traveller" : "travellers"} · {current.hotel.name}
-                  </p>
-                  <div className="ac-trip-foot">
-                    <b>{usd.format(current.total)}</b>
-                    <div>
-                      <Link href="/trip" className="btn btn-sm btn-ghost">
-                        Itinerary
-                      </Link>
-                      {!orders.some((o) => o.destId === prefs.destId) && (
-                        <Link href="/checkout" className="btn btn-sm btn-ember">
-                          Pay once
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </article>
-              </>
-              )}
-
-              <h2 className="ac-h2">Recent plans</h2>
-              {history.length === 0 ? (
+              <h2 className="ac-h2">Your trips</h2>
+              {trips.length === 0 ? (
                 <p className="ac-empty">
                   No plans yet. <Link href="/plan">Start one in the planner</Link>.
                 </p>
               ) : (
-                <div className="ac-grid">
-                  {history.map((h) => {
-                    const d = getDestination(h.destId);
+                <div className="ac-trips">
+                  {trips.map((t) => {
+                    const d = getDestination(t.destId);
                     return (
-                      <Link key={h.id} href={`/plan?q=${encodeURIComponent(d.name)}`} className="ac-mini">
+                      <article key={t.key} className="ac-trip">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={d.card} alt="" />
-                        <span>
-                          <b>{h.title}</b>
-                          <small>{new Date(h.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small>
-                        </span>
-                      </Link>
+                        <div className="ac-trip-body">
+                          <span className={`ac-status ${t.paid ? "is-booked" : ""}`}>{t.paid ? "Paid" : "Planned, not paid"}</span>
+                          <h3>{t.title}</h3>
+                          <p>{new Date(t.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                          <div className="ac-trip-foot">
+                            {t.total !== null && <b>{usd.format(t.total)}</b>}
+                            <div>
+                              {t.paid ? (
+                                <Link href={`/tickets?order=${encodeURIComponent(t.orderId!)}`} className="btn btn-sm btn-ember">
+                                  <Icon name="ticket" size={14} /> Tickets
+                                </Link>
+                              ) : (
+                                <Link href={`/plan?resume=${encodeURIComponent(t.tripId!)}&dest=${encodeURIComponent(t.destId)}`} className="btn btn-sm btn-ghost">
+                                  Itinerary
+                                </Link>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </article>
                     );
                   })}
                 </div>
@@ -392,7 +374,7 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                       <th>Date</th>
                       <th>Bookings</th>
                       <th>Total</th>
-                      <th aria-label="Receipt" />
+                      <th aria-label="Tickets and receipt" />
                     </tr>
                   </thead>
                   <tbody>
@@ -403,7 +385,10 @@ function AccountInner({ user }: { user: NonNullable<ReturnType<typeof useUser>> 
                         <td>{new Date(o.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
                         <td>{o.items}</td>
                         <td className="ac-mono">{usd.format(o.total)}</td>
-                        <td>
+                        <td className="ac-table-actions">
+                          <Link href={`/tickets?order=${encodeURIComponent(o.id)}`} className="ac-icon-btn" aria-label={`Tickets for ${o.id}`}>
+                            <Icon name="ticket" size={16} />
+                          </Link>
                           <button type="button" className="ac-icon-btn" aria-label={`Download receipt for ${o.id}`} onClick={() => downloadReceipt(o)}>
                             <Icon name="download" size={16} />
                           </button>

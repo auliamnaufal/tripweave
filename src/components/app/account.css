@@ -372,6 +372,11 @@
 .ac-form > .ac-field:first-child .ac-h2 {
   margin-top: 0;
 }
+.ac-trips {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 .ac-trip {
   display: grid;
   grid-template-columns: 300px 1fr;
@@ -658,6 +663,10 @@
 .ac-mono {
   font-family: var(--font-mono-stack);
   font-size: 13px;
+}
+.ac-table-actions {
+  display: flex;
+  gap: 8px;
 }
 .ac-icon-btn {
   display: grid;

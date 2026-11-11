@@ -65,7 +65,8 @@ export function AppSidebar({
 }: {
   /** The planner resets in place; elsewhere New trip opens a fresh planner. */
   onNewTrip?: () => void;
-  onRecent?: (destId: string) => void;
+  /** On the planner page this resumes trip `id` for real; elsewhere there's no handler, so `recent()` falls back to a fresh `/plan?q=` navigation keyed on destId. */
+  onRecent?: (tripId: string, destId: string) => void;
   busy?: boolean;
   /** Called after any link is followed (the mobile drawer closes itself). */
   onNavigate?: () => void;
@@ -90,10 +91,10 @@ export function AppSidebar({
     else router.push("/plan");
   }
 
-  function recent(destId: string) {
+  function recent(h: { id: string; destId: string }) {
     onNavigate?.();
-    if (onRecent) onRecent(destId);
-    else router.push(`/plan?q=${encodeURIComponent(getDestination(destId).name)}`);
+    if (onRecent) onRecent(h.id, h.destId);
+    else router.push(`/plan?q=${encodeURIComponent(getDestination(h.destId).name)}`);
   }
 
   return (
@@ -130,9 +131,9 @@ export function AppSidebar({
           <p className="pl-recent-empty">No trips yet. Plans you make show up here.</p>
         ) : (
           history.map((h) => (
-            <button key={h.id} type="button" onClick={() => !busy && recent(h.destId)}>
+            <button key={h.id} type="button" onClick={() => !busy && recent(h)}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={getDestination(h.destId).card} alt="" />
+              <img src={getDestination(h.destId).card} alt="" width={26} height={26} />
               <span>{h.title}</span>
             </button>
           ))
@@ -146,7 +147,7 @@ export function AppSidebar({
 }
 
 /** The phone version of the same sidebar: a menu button that slides it in. */
-export function MobileNav(props: { onNewTrip?: () => void; onRecent?: (destId: string) => void; busy?: boolean }) {
+export function MobileNav(props: { onNewTrip?: () => void; onRecent?: (tripId: string, destId: string) => void; busy?: boolean }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;

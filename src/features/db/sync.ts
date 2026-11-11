@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { livePaymentStore, livePlanStore } from "@/features/live/liveStore";
 import { docsStore, historyStore, ordersStore, savedStore, userStore, type DemoUser, type Order } from "@/features/ui-mock/tripStore";
 
-async function getJson<T>(url: string): Promise<T | null> {
+export async function getJson<T>(url: string): Promise<T | null> {
   try {
     const res = await fetch(url, { cache: "no-store" });
     return res.ok ? ((await res.json()) as T) : null;
@@ -45,8 +45,9 @@ export async function signOut(): Promise<void> {
   clearLocalUserData();
 }
 
-/** Fire-and-forget: persists a finished trip plan. Returns the new trip id, or null for a guest/failure. */
+/** Fire-and-forget: creates or (with `id`) updates a trip's saved plan. Returns its id, or null for a guest/failure. */
 export async function syncTrip(input: {
+  id?: string;
   destId: string;
   title: string;
   prefs: TripPrefs;
@@ -63,6 +64,17 @@ export async function syncTrip(input: {
   } catch {
     return null;
   }
+}
+
+/** Loads one trip's full record (prefs/plan included), for resuming it in the planner. Null if missing or a guest. */
+export async function loadTrip(tripId: string): Promise<{ destId: string; title: string; prefs: TripPrefs; plan: unknown; isLive: boolean } | null> {
+  return getJson(`/api/trips?id=${encodeURIComponent(tripId)}`);
+}
+
+/** Loads a trip's stored chat transcript, oldest first. */
+export async function loadChatHistory(tripId: string): Promise<{ role: "user" | "agent"; text: string }[]> {
+  const res = await getJson<{ messages: { role: "user" | "agent"; text: string }[] }>(`/api/chat?tripId=${encodeURIComponent(tripId)}`);
+  return res?.messages ?? [];
 }
 
 /** Fire-and-forget: logs one chat turn. No-ops for guests. */
