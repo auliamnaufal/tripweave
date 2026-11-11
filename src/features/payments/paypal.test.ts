@@ -361,7 +361,26 @@ describe("capturePlanOrder declines", () => {
   it("throws on any other capture failure", async () => {
     reply(orderDetail("APPROVED", [{ referenceId: "tripweave-bundle", amountValue: "10.00" }]));
     reply({ name: "INTERNAL_SERVER_ERROR", message: "An internal server error occurred.", debug_id: "abc" }, 500);
+    reply(orderDetail("APPROVED", [{ referenceId: "tripweave-bundle", amountValue: "10.00" }]));
 
     await expect(capturePlanOrder("order-1")).rejects.toThrow("PayPal capture failed.");
+  });
+
+  it("reports the capture when the call failed but PayPal did capture the money", async () => {
+    reply(orderDetail("APPROVED", [{ referenceId: "tripweave-bundle", amountValue: "10.00" }]));
+    reply({ name: "INTERNAL_SERVER_ERROR", message: "An internal server error occurred.", debug_id: "abc" }, 500);
+    reply(orderDetail("COMPLETED", [{ referenceId: "tripweave-bundle", amountValue: "10.00", captureId: "capture-9" }]));
+
+    const result = await capturePlanOrder("order-1");
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.purchaseUnits[0]).toMatchObject({ amountMinorUnits: 1000, captureId: "capture-9" });
+  });
+});
+
+describe("createPlanOrder malformed replies", () => {
+  it("refuses an order response with no status instead of assuming CREATED", async () => {
+    reply({ id: "o", links: [{ rel: "payer-action", href: "x" }] });
+    await expect(createPlanOrder([offer("hotel-main", 95000)])).rejects.toThrow("PayPal order returned no status.");
   });
 });

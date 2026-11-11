@@ -208,7 +208,9 @@ export async function createPlanOrder(
   const links = order.links ?? [];
   const approve = links.find((link) => link.rel === "payer-action") ?? links.find((link) => link.rel === "approve");
   if (!order.id || !approve) throw new Error("PayPal order has no approval link.");
-  return { id: order.id, approveUrl: approve.href, status: order.status ?? "CREATED" };
+  // A response with no status is malformed: refuse it rather than report a status we made up.
+  if (!order.status) throw new Error("PayPal order returned no status.");
+  return { id: order.id, approveUrl: approve.href, status: order.status };
 }
 
 /** One purchase unit's outcome: what it cost, who captured it, and (for a real third-party payee) whether that capture is actually done yet. */
@@ -274,6 +276,11 @@ export async function capturePlanOrder(orderId: string, options: PayPalCallOptio
     if (errorBody(error)?.details?.[0]?.issue === "INSTRUMENT_DECLINED") {
       return { status: "INSTRUMENT_DECLINED", purchaseUnits: existing.purchaseUnits };
     }
+    // Any other failure (a timeout, or the SDK failing to parse the reply) may
+    // still have captured the money. Re-read the order before telling the buyer
+    // it didn't go through.
+    const after = await getPlanOrder(orderId).catch(() => null);
+    if (after?.status === "COMPLETED") return after;
     throw new Error("PayPal capture failed.");
   }
 }

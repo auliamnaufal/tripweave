@@ -95,6 +95,14 @@ describe("intake → brief", () => {
     expect(briefFromIntent({ ...intent, origin: read("Surabaya, Indonesia") }, defaults, today)!.origin).toEqual({ city: "Surabaya", country: "Indonesia" });
   });
 
+  it("still refuses a bare-string origin that is the destination itself", () => {
+    const defaults = { origin: { city: "Jakarta", country: "Indonesia" }, travelers: 2, budgetUsd: 3000 };
+    const today = new Date("2026-11-11T00:00:00Z");
+    const origin = intentSchema.parse({ ...intent, origin: "Tokyo" }).origin;
+    // The country comes from the matching stop, not the city, so Tokyo -> Tokyo is caught.
+    expect(() => briefFromIntent({ ...intent, origin }, defaults, today)).toThrow(/different from where you're flying from/);
+  });
+
   it("returns nothing to plan when no destination was understood", () => {
     expect(briefFromIntent({ ...intent, stops: [] }, { origin: { city: "Jakarta", country: "Indonesia" }, travelers: 1, budgetUsd: 1000 })).toBeNull();
   });

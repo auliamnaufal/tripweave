@@ -34,18 +34,22 @@ export type GearRoom = {
   tripTotalMinorUnits: number;
   /** What's left under the hard budget after the Trip Order. */
   leftoverMinorUnits: number;
-  /** Each item is searched at or under this, so one of each still fits. */
+  /** How many of each item the cap allows for: one per traveller. */
+  travelers: number;
+  /** Each item is searched at or under this, so one of each per traveller still fits. */
   perItemCapMinorUnits: number;
 };
 
-/** Pure: how much each gear item may cost so the trip plus one of each stays under budget. */
-export function gearRoom(budgetMinorUnits: number, tripTotalMinorUnits: number, needs: number): GearRoom {
+/** Pure: how much each gear item may cost so the trip plus one of each, per traveller, stays under budget. */
+export function gearRoom(budgetMinorUnits: number, tripTotalMinorUnits: number, needs: number, travelers = 1): GearRoom {
   const leftover = Math.max(0, budgetMinorUnits - tripTotalMinorUnits);
+  const people = Math.max(1, travelers);
   return {
     budgetMinorUnits,
     tripTotalMinorUnits,
     leftoverMinorUnits: leftover,
-    perItemCapMinorUnits: needs > 0 ? Math.floor(leftover / needs) : 0,
+    travelers: people,
+    perItemCapMinorUnits: needs > 0 ? Math.floor(leftover / (needs * people)) : 0,
   };
 }
 
@@ -103,10 +107,10 @@ export async function buildGearKit(
 ): Promise<GearKit> {
   const budget = input.brief.hardBudget.amountMinorUnits;
   if (budget - input.tripTotalMinorUnits < MIN_GEAR_ROOM_MINOR_UNITS) {
-    return { room: gearRoom(budget, input.tripTotalMinorUnits, 0), items: [] };
+    return { room: gearRoom(budget, input.tripTotalMinorUnits, 0, input.brief.travelers), items: [] };
   }
   const needs = await (deps.needs ?? gearNeeds)(input.brief, input.offers);
-  const room = gearRoom(budget, input.tripTotalMinorUnits, needs.length);
+  const room = gearRoom(budget, input.tripTotalMinorUnits, needs.length, input.brief.travelers);
   const search = deps.search ?? searchGear;
   const results = await Promise.allSettled(needs.map((need) => search(need.query, room.perItemCapMinorUnits)));
   const rejected = results.filter((result) => result.status === "rejected");

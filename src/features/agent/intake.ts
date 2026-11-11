@@ -82,15 +82,21 @@ const DAY_MS = 86_400_000;
 
 /**
  * The stated origin, or the traveller's default. A city stated without a
- * country takes the default's country when it is the same city; otherwise the
- * city stands in for it. The country only tells origin and destination apart,
- * so this never changes which airport is searched.
+ * country takes its country from a stop or the default with the same city
+ * (so "from Tokyo" on a Tokyo trip is still caught as origin = destination);
+ * otherwise the city stands in for it. The country only tells origin and
+ * destination apart, so this never changes which airport is searched.
  */
-function originFrom(stated: TripIntent["origin"], fallback: IntakeDefaults["origin"]): IntakeDefaults["origin"] {
+function originFrom(
+  stated: TripIntent["origin"],
+  fallback: IntakeDefaults["origin"],
+  stops: TripIntent["stops"],
+): IntakeDefaults["origin"] {
   if (!stated) return fallback;
   if (stated.country) return { city: stated.city, country: stated.country };
-  const sameCity = stated.city.toLowerCase() === fallback.city.toLowerCase();
-  return { city: stated.city, country: sameCity ? fallback.country : stated.city };
+  const city = stated.city.toLowerCase();
+  const known = [...stops, fallback].find((place) => place.city.toLowerCase() === city);
+  return { city: stated.city, country: known?.country ?? stated.city };
 }
 
 /**
@@ -110,7 +116,7 @@ export function briefFromIntent(intent: TripIntent, defaults: IntakeDefaults, to
   const totalDays = nights + 1;
 
   const brief = {
-    origin: originFrom(intent.origin, defaults.origin),
+    origin: originFrom(intent.origin, defaults.origin, intent.stops),
     destination: { city: intent.stops[0].city, country: intent.stops[0].country },
     timeZone: "UTC",
     travelers,

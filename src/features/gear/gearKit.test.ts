@@ -41,8 +41,12 @@ function product(over: Record<string, unknown> = {}) {
 
 describe("gearRoom", () => {
   it("splits what's left under the budget so one of each item still fits", () => {
-    expect(gearRoom(300_000, 260_000, 4)).toEqual({ budgetMinorUnits: 300_000, tripTotalMinorUnits: 260_000, leftoverMinorUnits: 40_000, perItemCapMinorUnits: 10_000 });
+    expect(gearRoom(300_000, 260_000, 4)).toEqual({ budgetMinorUnits: 300_000, tripTotalMinorUnits: 260_000, leftoverMinorUnits: 40_000, travelers: 1, perItemCapMinorUnits: 10_000 });
     expect(gearRoom(300_000, 310_000, 3).perItemCapMinorUnits).toBe(0);
+  });
+
+  it("leaves room for one of each per traveller", () => {
+    expect(gearRoom(300_000, 260_000, 4, 2).perItemCapMinorUnits).toBe(5_000);
   });
 });
 
@@ -127,9 +131,10 @@ describe("buildGearKit", () => {
     const search = vi.fn(async (query: string) => (query.includes("adapter") ? [toGearProduct(product(), 99_999)!] : []));
     const kit = await buildGearKit({ brief, offers: [], tripTotalMinorUnits: 270_000 }, { needs, search });
 
-    expect(kit.room.perItemCapMinorUnits).toBe(10_000);
+    // $300 left, 3 needs, 2 travellers: $50 each.
+    expect(kit.room.perItemCapMinorUnits).toBe(5_000);
     expect(search).toHaveBeenCalledTimes(3);
-    expect(search).toHaveBeenCalledWith("universal travel adapter usb-c", 10_000);
+    expect(search).toHaveBeenCalledWith("universal travel adapter usb-c", 5_000);
     expect(kit.items.map((item) => item.products.length)).toEqual([1, 0, 0]);
   });
 

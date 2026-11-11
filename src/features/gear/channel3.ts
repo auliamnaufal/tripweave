@@ -125,12 +125,27 @@ export async function searchGear(
   const body = searchResponseSchema.parse(await response.json());
   const seen = new Set<string>();
   const products: GearProduct[] = [];
+  let unparsed = 0;
   for (const raw of body.products) {
+    // Told apart from "nothing buyable within the cap": a parse miss means our
+    // reading of Channel3's shape is wrong, not that the store has no stock.
+    if (!productSchema.safeParse(raw).success) {
+      unparsed += 1;
+      continue;
+    }
     const product = toGearProduct(raw, capMinorUnits);
     if (!product || seen.has(product.url)) continue;
     seen.add(product.url);
     products.push(product);
     if (products.length === (deps.limit ?? 3)) break;
+  }
+  if (unparsed > 0) {
+    console.warn(`Channel3: ${unparsed} of ${body.products.length} products didn't match the expected shape`, { query });
+  }
+  if (body.products.length > 0 && products.length === 0) {
+    // Channel3 already filtered to in-stock items under the cap, so every one
+    // being dropped here points at availability/price/currency being read wrong.
+    console.warn(`Channel3 returned ${body.products.length} products but none passed our filters`, { query, capMinorUnits });
   }
   return products;
 }

@@ -65,8 +65,8 @@ export function GearPanel({ quoteId }: { quoteId: string }) {
           <p className="gear-room">
             <Icon name="wallet" size={15} />
             <span>
-              {usd(kit.room.leftoverMinorUnits)} left under your limit · each pick at or under <b>{usd(kit.room.perItemCapMinorUnits)}</b>, so one of each still
-              fits.
+              {usd(kit.room.leftoverMinorUnits)} left under your limit · each pick at or under <b>{usd(kit.room.perItemCapMinorUnits)}</b>, so one of each
+              {kit.room.travelers > 1 ? ` for all ${kit.room.travelers} travellers` : ""} still fits.
             </span>
           </p>
           <ul className="gear-needs">

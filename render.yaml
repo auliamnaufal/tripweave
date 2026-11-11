@@ -10,8 +10,11 @@ services:
     plan: free
     region: singapore
     branch: master
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
-    startCommand: pnpm start
+    # `corepack pnpm` runs the pnpm pinned by package.json's packageManager
+    # without `corepack enable`, which writes shims into the Node install dir
+    # and can fail on Render.
+    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
+    startCommand: corepack pnpm start
     healthCheckPath: /
     autoDeploy: true
     envVars:
