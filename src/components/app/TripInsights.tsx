@@ -7,10 +7,11 @@ import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon } from "@/components/brand/Icon";
 import type { InsightsData } from "@/features/insights/insightsData";
 import "./trip-insights.css";
+import { InsightsCanvasSk } from "@/components/app/Skeleton";
 
 const TripInsightsStudio = dynamic(() => import("@/components/app/TripInsightsStudio"), {
   ssr: false,
-  loading: () => <div className="ti-skeleton" aria-busy="true" />,
+  loading: () => <InsightsCanvasSk />,
 });
 
 type Props = { data: InsightsData; licenseKey?: string; aiEnabled: boolean; error?: string };

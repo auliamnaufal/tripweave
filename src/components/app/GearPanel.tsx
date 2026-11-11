@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Icon } from "@/components/brand/Icon";
 import { fetchGearKit, fetchSimilarGear, type GearKitResult, type SimilarGearResult } from "@/features/live/client";
 import "./gear.css";
+import { GearKitSk, GearProductsSk } from "@/components/app/Skeleton";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const usd = (minor: number) => money.format(minor / 100);
@@ -73,6 +74,8 @@ export function GearPanel({ quoteId }: { quoteId: string }) {
           {state.message}
         </p>
       )}
+
+      {state.kind === "loading" && <GearKitSk />}
 
       {kit && kit.items.length === 0 && (
         <p className="gear-fine">Your plan uses the whole budget, so there’s nothing to suggest without going over it.</p>
@@ -147,7 +150,14 @@ function SimilarList({ product, state }: { product: Product; state: Similar | un
   return (
     <div id={`gear-similar-${product.id}`} className="gear-similar" aria-live="polite" aria-busy={state?.kind === "loading"}>
       <p className="gear-similar-head">Like “{product.title}”, still within {state?.kind === "ready" ? usd(state.result.capMinorUnits) : "your cap"}</p>
-      {(!state || state.kind === "loading") && <p className="gear-fine">Asking Channel3 for close matches…</p>}
+      {(!state || state.kind === "loading") && (
+        <>
+          <p className="sr-only" role="status">
+            Asking Channel3 for close matches…
+          </p>
+          <GearProductsSk count={2} />
+        </>
+      )}
       {state?.kind === "error" && (
         <p className="gear-fine is-error" role="alert">
           {state.message}

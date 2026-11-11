@@ -279,19 +279,6 @@
   max-width: 760px;
   margin: 6vh auto 0;
 }
-.pl-welcome-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 14px;
-  margin-top: 12vh;
-}
-.pl-welcome-loading .bk-spin {
-  width: 22px;
-  height: 22px;
-  border-width: 3px;
-}
 .pl-hi {
   color: var(--ember-deep);
   font-size: 15px;

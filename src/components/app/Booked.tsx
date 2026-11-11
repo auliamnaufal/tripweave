@@ -11,6 +11,7 @@ import { livePaymentStore, type LivePayment } from "@/features/live/liveStore";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
 import type { TravelOfferView } from "@/features/planner/travelOffer";
 import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
+import { BookedSkeleton } from "@/components/app/Skeleton";
 
 type Status = "queued" | "booking" | "booked" | "failed" | "refunded";
 type Kind = "flight" | "hotel" | "activity";
@@ -53,7 +54,7 @@ const captureKey = (orderId: string) => `tw-capture-${orderId}`;
 export function Booked() {
   const hydrated = useHydrated();
   const view = useTripView();
-  if (!hydrated) return <div className="bk-page" aria-busy="true" />;
+  if (!hydrated) return <BookedSkeleton />;
   return <BookedInner view={view} payment={isLive(view) ? livePaymentStore.get() : null} />;
 }
 

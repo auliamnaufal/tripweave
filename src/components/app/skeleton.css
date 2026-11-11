@@ -1,0 +1,197 @@
+/*
+ * Loading skeletons: grey blocks shaped like the content on their way.
+ * Each skeleton reuses its page's real layout classes (trip-grid, co-grid…),
+ * so the blocks sit where the content will land and nothing jumps on swap.
+ */
+
+.sk {
+  --sk-base: var(--paper-2);
+  --sk-shine: rgba(251, 249, 244, 0.6);
+  position: relative;
+  display: block;
+  overflow: hidden;
+  flex: none;
+  max-width: 100%;
+  border-radius: 8px;
+  background: var(--sk-base);
+}
+/* A light band sweeps across. Transform only, so it stays on the compositor. */
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, var(--sk-shine) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: sk-shimmer 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes sk-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sk::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* On dark surfaces (pay card, photo hero). */
+.sk-dark {
+  --sk-base: rgba(241, 237, 228, 0.14);
+  --sk-shine: rgba(241, 237, 228, 0.14);
+}
+.sk-round {
+  border-radius: 999px;
+}
+.sk-text {
+  height: 14px;
+  border-radius: 6px;
+}
+
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sk-stack {
+  display: grid;
+  gap: 10px;
+}
+.sk-card {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+/* Trip */
+.sk-trip-hero {
+  background: var(--paper-3);
+}
+.sk-trip-hero .sk {
+  --sk-base: rgba(24, 32, 27, 0.09);
+  --sk-shine: rgba(251, 249, 244, 0.35);
+}
+.sk-trip-hero .trip-hero-copy {
+  display: grid;
+  gap: 18px;
+}
+.sk-trip-days {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+.sk-trip-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 74px;
+}
+
+/* Insights */
+.sk-ti-canvas {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: 16px;
+  padding: 20px;
+}
+.sk-ti-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.sk-ti-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 16px;
+}
+@media (max-width: 760px) {
+  .sk-ti-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sk-ti-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Account */
+.sk-ac-trip {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--surface);
+}
+.sk-ac-trip > .sk:first-child {
+  height: 100%;
+  min-height: 210px;
+  border-radius: 0;
+}
+.sk-ac-trip-body {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 24px;
+}
+@media (max-width: 760px) {
+  .sk-ac-trip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sk-ac-trip > .sk:first-child {
+    min-height: 160px;
+  }
+}
+
+/* Tickets */
+.sk-tk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.sk-tk-main {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+}
+.sk-tk-stub {
+  display: grid;
+  place-items: center;
+  border-left: 1px dashed var(--line-strong);
+  padding: 20px;
+}
+@media (max-width: 640px) {
+  .sk-tk {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sk-tk-stub {
+    border-left: 0;
+    border-top: 1px dashed var(--line-strong);
+  }
+}
+
+/* Planner chat while a saved trip loads */
+.sk-chat {
+  display: grid;
+  gap: 22px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.sk-chat-user {
+  justify-self: end;
+  width: min(60%, 360px);
+  height: 46px;
+  border-radius: 18px 18px 4px 18px;
+}
+.sk-chat-agent {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+}

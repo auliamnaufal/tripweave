@@ -22,11 +22,12 @@ import { fetchRebookSuggestions } from "@/features/live/client";
 import type { RebookResponse } from "@/features/rebook/types";
 import "./edit-trip.css";
 import "./itinerary-timeline.css";
+import { RebookSuggestionsSk, Sk, TripSkeleton } from "@/components/app/Skeleton";
 
 // Bryntum touches window on import, so the timeline only ever loads in the browser.
 const ItineraryTimeline = dynamic(() => import("@/components/app/ItineraryTimeline"), {
   ssr: false,
-  loading: () => <div className="trip-timeline-skeleton" aria-busy="true" />,
+  loading: () => <Sk className="trip-timeline-skeleton" w="100%" h={240} r={16} />,
 });
 
 const kindIcon: Record<string, IconName> = {
@@ -47,7 +48,7 @@ const sections = [
 export function TripView() {
   const hydrated = useHydrated();
   const view = useTripView();
-  if (!hydrated) return <div className="trip-page" aria-busy="true" />;
+  if (!hydrated) return <TripSkeleton />;
   return <TripViewInner view={view} />;
 }
 
@@ -336,6 +337,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
                   </button>
                 )}
               </div>
+              {rebookHere?.phase === "loading" && <RebookSuggestionsSk count={Math.min(freedActivities, 3)} />}
               {rebookHere?.phase === "error" && <p className="trip-rebook-error">{rebookHere.error}</p>}
               {suggestions && suggestions.length > 0 && (
                 <>

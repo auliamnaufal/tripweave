@@ -50,10 +50,6 @@
 .ti-studio {
   height: 100%;
 }
-.ti-skeleton {
-  height: 100%;
-  background: var(--paper-2);
-}
 .ti-empty {
   display: grid;
   justify-items: start;
