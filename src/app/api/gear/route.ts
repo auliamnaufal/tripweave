@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { AFFILIATE_DISCLOSURE, Channel3Error, channel3Configured } from "@/features/gear/channel3";
-import { createKitCache, gearCacheKey } from "@/features/gear/gearCache";
-import { buildGearKit, type GearKit } from "@/features/gear/gearKit";
+import { gearCacheKey } from "@/features/gear/gearCache";
+import { gearKits as kits } from "@/features/gear/kitStore";
+import { buildGearKit } from "@/features/gear/gearKit";
 import { parseTripBrief } from "@/features/planner/tripBrief";
 import { canAccess } from "@/features/quotes/quote";
 import { getQuote } from "@/features/quotes/quoteStore";
@@ -11,7 +12,6 @@ export const runtime = "nodejs";
 
 const gearRequestSchema = z.object({ quoteId: z.string().uuid() });
 
-const kits = createKitCache<GearKit>();
 
 /**
  * Gear worth packing for a priced plan, from real retailers via Channel3.
