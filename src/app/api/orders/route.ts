@@ -14,7 +14,9 @@ export async function GET() {
     id: o.label,
     title: o.title,
     destId: o.dest_id,
-    total: o.total_minor_units / 100,
+    // Rounded to match usdFromMinor() in the live adapter: every "paid" check compares
+    // whole-dollar totals, so an order with cents must round the same way or it never matches.
+    total: Math.round(o.total_minor_units / 100),
     at: o.created_at,
     items: o.items,
   }));

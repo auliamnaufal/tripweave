@@ -105,6 +105,11 @@ export type Order = { id: string; title: string; destId: string; total: number; 
 export const ordersStore = createStore<Order[]>("tw-orders", []);
 export const useOrders = ordersStore.useValue;
 
+/** An order for this (destId, total) pairing already exists — every Pay button for this plan reads this, not just the trip page. */
+export function tripPaidFor(orders: Order[], destId: string, total: number): boolean {
+  return orders.some((o) => o.destId === destId && o.total === total);
+}
+
 export const savedStore = createStore<string[]>("tw-saved", ["kyoto", "lisbon", "iceland"]);
 export const useSaved = savedStore.useValue;
 

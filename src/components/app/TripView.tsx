@@ -6,7 +6,7 @@ import { AppTopbar } from "@/components/app/AppTopbar";
 import { Icon, type IconName } from "@/components/brand/Icon";
 import { usd } from "@/features/ui-mock/data";
 import { isLive, useTripView, type AnyTripView } from "@/features/live/useTripView";
-import { savedStore, useHydrated, useOrders, useSaved } from "@/features/ui-mock/tripStore";
+import { savedStore, tripPaidFor, useHydrated, useOrders, useSaved } from "@/features/ui-mock/tripStore";
 import { gsap, prefersReducedMotion, SplitText, useGSAP } from "@/lib/gsap";
 import { useLenis } from "@/components/motion/SmoothScroll";
 import { DealPanel } from "@/components/app/DealPanel";
@@ -68,7 +68,7 @@ function TripViewInner({ view }: { view: AnyTripView }) {
   // Same (destId, total) pairing Booked.tsx records the order under — this plan
   // was already paid for if an order for it is already in the store.
   const orders = useOrders();
-  const paid = orders.some((o) => o.destId === view.plan.prefs.destId && o.total === total);
+  const paid = tripPaidFor(orders, view.plan.prefs.destId, total);
   // Until it's paid, the plan stays editable here: options swap in place, no chat round trip.
   const live = useLivePlan();
   const editable = isLive(view) && !paid && Boolean(live?.quoteId);
