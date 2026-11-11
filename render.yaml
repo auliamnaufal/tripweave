@@ -57,9 +57,6 @@ services:
       # Channel3 gear links on the trip page (link-outs, never in the PayPal order).
       - key: CHANNEL3_API_KEY
         sync: false
-      # AG Studio licence for /insights (watermarked trial while empty).
-      - key: AG_STUDIO_LICENSE_KEY
-        sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
