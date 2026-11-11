@@ -220,3 +220,49 @@ export async function markWebhookProcessed(eventId: string, outcome: string, quo
     .eq("event_id", eventId);
   if (error) fail("webhook update", error);
 }
+
+/**
+ * Every Trip Order a user has paid for (captured or being captured), newest
+ * first, with each one's stored bookings. Feeds the Trip spend dashboard.
+ */
+export async function listPaidQuotesWithBookings(
+  userId: string,
+  limit = 50,
+): Promise<{ quote: PlanQuote & { createdAt: string }; bookings: BookingRecord[] }[]> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("plan_quotes")
+    .select(`${QUOTE_COLUMNS}, created_at`)
+    .eq("user_id", userId)
+    .in("status", ["capturing", "completed", "needs_attention"])
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) fail("paid lookup", error);
+  const rows = (data ?? []) as (QuoteRow & { created_at: string })[];
+  if (rows.length === 0) return [];
+
+  const { data: bookingRows, error: bookingError } = await db
+    .from("bookings")
+    .select("quote_id, offer_id, status, amount_minor_units, booking_ref, failure_reason, refund_status")
+    .in(
+      "quote_id",
+      rows.map((row) => row.id),
+    );
+  if (bookingError) fail("booking lookup", bookingError);
+
+  const byQuote = new Map<string, BookingRecord[]>();
+  for (const row of bookingRows ?? []) {
+    const list = byQuote.get(row.quote_id as string) ?? [];
+    list.push({
+      offerId: row.offer_id as string,
+      status: row.status as BookingStatus,
+      amountMinorUnits: row.amount_minor_units as number,
+      bookingRef: (row.booking_ref as string | null) ?? null,
+      failureReason: (row.failure_reason as string | null) ?? null,
+      refundStatus: (row.refund_status as string | null) ?? null,
+    });
+    byQuote.set(row.quote_id as string, list);
+  }
+
+  return rows.map((row) => ({ quote: { ...toQuote(row), createdAt: row.created_at }, bookings: byQuote.get(row.id) ?? [] }));
+}
