@@ -10,9 +10,25 @@ import { MAX_NIGHTS, MAX_TRAVELERS, tripBriefSchema } from "@/features/planner/t
 
 const place = z.object({ city: z.string().trim().min(1).max(80), country: z.string().trim().min(1).max(80) });
 
+/**
+ * Where they fly from. Models sometimes answer with a bare "Jakarta" or
+ * "Jakarta, Indonesia" instead of an object; read those rather than failing
+ * the whole request. The country may be unknown: airports are resolved from
+ * the city alone, and briefFromIntent fills the country.
+ */
+const originSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+    return { city: parts[0], country: parts.length > 1 ? parts[parts.length - 1] : null };
+  },
+  z.object({ city: z.string().trim().min(1).max(80), country: z.string().trim().min(1).max(80).nullish() }).nullable(),
+);
+
 export const intentSchema = z.object({
   clarification: z.string().max(240).nullable(),
-  origin: place.nullable(),
+  origin: originSchema,
   startDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -36,7 +52,7 @@ export function intakePrompt(today: string): string {
     "- A place visited as a day trip (Mount Fuji, Nara, a national park) is a dayPlan, not a stop, unless they say they want to sleep there.",
     '- If they assign cities to days ("Tokyo day 1, Osaka day 2"), make each city a stop with as many nights as days spent there, and put the day trip on its day, sleeping in the nearest stop.',
     '- "startDate": YYYY-MM-DD if they gave a date or month (use the 10th of a month they named), else null. Never a date before today.',
-    '- "origin": where they fly from, only if they said so, else null.',
+    '- "origin": where they fly from, as an object {"city": "...", "country": "..."} (English names), only if they said so, else null. Never a bare string.',
     '- "travelers", "budgetUsd": only if stated (convert other currencies to USD roughly), else null.',
     '- "preferences": short tags like "food", "slow mornings", "culture" that they expressed.',
     '- "summary": one short English sentence restating the route (the app is in English), e.g. "Tokyo 1 night, then Osaka 2 nights, with a Mount Fuji day trip on day 3."',
@@ -65,6 +81,19 @@ export type IntakeDefaults = {
 const DAY_MS = 86_400_000;
 
 /**
+ * The stated origin, or the traveller's default. A city stated without a
+ * country takes the default's country when it is the same city; otherwise the
+ * city stands in for it. The country only tells origin and destination apart,
+ * so this never changes which airport is searched.
+ */
+function originFrom(stated: TripIntent["origin"], fallback: IntakeDefaults["origin"]): IntakeDefaults["origin"] {
+  if (!stated) return fallback;
+  if (stated.country) return { city: stated.city, country: stated.country };
+  const sameCity = stated.city.toLowerCase() === fallback.city.toLowerCase();
+  return { city: stated.city, country: sameCity ? fallback.country : stated.city };
+}
+
+/**
  * Code, not the model, turns an intent into a brief: fills what wasn't said
  * from the traveller's defaults, keeps dates in the future, and validates the
  * result with the same schema /api/plan enforces.
@@ -81,7 +110,7 @@ export function briefFromIntent(intent: TripIntent, defaults: IntakeDefaults, to
   const totalDays = nights + 1;
 
   const brief = {
-    origin: intent.origin ?? defaults.origin,
+    origin: originFrom(intent.origin, defaults.origin),
     destination: { city: intent.stops[0].city, country: intent.stops[0].country },
     timeZone: "UTC",
     travelers,

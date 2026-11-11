@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTripBrief, tripBriefSchema } from "./tripBrief";
 import { stayForDay, tripLegs, tripStays } from "./itinerary";
-import { briefFromIntent, type TripIntent } from "@/features/agent/intake";
+import { briefFromIntent, intentSchema, type TripIntent } from "@/features/agent/intake";
 import { searchActivities, searchHotels } from "@/features/suppliers/synthetic";
 import { alternativesFor, slotOf, swapOffer } from "@/features/suppliers/alternatives";
 import { toTravelOffer, type TravelOffer } from "./travelOffer";
@@ -78,6 +78,21 @@ describe("intake → brief", () => {
     expect(brief.stops).toHaveLength(2);
     expect(brief.dayPlans).toEqual([{ day: 3, wish: "Mount Fuji" }]);
     expect(brief.hardBudget.amountMinorUnits).toBe(300000);
+  });
+
+  it("reads an origin the model wrote as a bare string instead of failing", () => {
+    const defaults = { origin: { city: "Jakarta", country: "Indonesia" }, travelers: 2, budgetUsd: 3000 };
+    const today = new Date("2026-11-11T00:00:00Z");
+    const read = (origin: unknown) => intentSchema.parse({ ...intent, origin }).origin;
+
+    expect(read("Jakarta")).toEqual({ city: "Jakarta", country: null });
+    expect(read("Surabaya, Indonesia")).toEqual({ city: "Surabaya", country: "Indonesia" });
+    expect(read({ city: "Bandung", country: "Indonesia" })).toEqual({ city: "Bandung", country: "Indonesia" });
+    expect(read(null)).toBeNull();
+
+    // Same city as the default: its country comes from the default.
+    expect(briefFromIntent({ ...intent, origin: read("Jakarta") }, defaults, today)!.origin).toEqual({ city: "Jakarta", country: "Indonesia" });
+    expect(briefFromIntent({ ...intent, origin: read("Surabaya, Indonesia") }, defaults, today)!.origin).toEqual({ city: "Surabaya", country: "Indonesia" });
   });
 
   it("returns nothing to plan when no destination was understood", () => {
