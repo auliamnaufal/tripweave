@@ -1,7 +1,7 @@
 import type { TripBrief } from "@/features/planner/tripBrief";
 import type { TravelOffer } from "@/features/planner/travelOffer";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
-import { findDestination, type Destination } from "@/features/ui-mock/destinations";
+import { getDestination, type Destination } from "@/features/ui-mock/destinations";
 import type { SupplierAdapter } from "./adapter";
 import { isMultiCity, stayForDay, tripStays } from "@/features/planner/itinerary";
 import { simulateBooking } from "./booking";
@@ -12,7 +12,34 @@ import { simulateBooking } from "./booking";
 // destinations fall back to the generic templates below. Move the catalog to
 // its own module once real hotel/activity APIs (#11, #12) replace it.
 function catalogFor(brief: TripBrief): Destination | undefined {
-  return findDestination(`${brief.destination.city} ${brief.destination.country}`);
+  return localCatalog(brief.destination.city, { viaGateway: true });
+}
+
+// The places each catalog's hotels and activities are actually in. The UI's
+// keywords are broader on purpose ("tokyo" opens the Japan destination in the
+// chat), but a Tokyo stay must not be sold Kyoto's Gion food tour or ryokan.
+// A city outside these gets the generic, city-named fixtures instead.
+const CATALOG_PLACES: Record<string, readonly string[]> = {
+  oahu: ["oahu", "honolulu", "waikiki", "north shore", "hawaii"],
+  kyoto: ["kyoto"],
+  lisbon: ["lisbon", "lisboa", "sintra"],
+  patagonia: ["el chaltén", "el chalten", "chaltén", "chalten", "el calafate", "calafate", "patagonia"],
+  bali: ["ubud", "bali", "denpasar", "canggu", "seminyak"],
+  amalfi: ["positano", "amalfi", "ravello", "praiano"],
+  iceland: ["south iceland", "iceland", "vík", "vik", "selfoss"],
+};
+
+// A catalog trip's brief names the city it flies into (see flightCity in
+// features/live/client.ts): a Kyoto trip lands in Osaka, an Amalfi one in
+// Naples. That city stands for the catalog only when it is the whole trip,
+// never as one stop of a multi-city trip, where the traveller sleeps there.
+const GATEWAYS: Record<string, string> = { osaka: "kyoto", naples: "amalfi", reykjavik: "iceland", reykjavík: "iceland" };
+
+/** The catalog destination whose own hotels and activities are in `city`, if any. */
+export function localCatalog(city: string, options: { viaGateway?: boolean } = {}): Destination | undefined {
+  const place = city.trim().toLowerCase();
+  const id = Object.keys(CATALOG_PLACES).find((key) => CATALOG_PLACES[key].includes(place)) ?? (options.viaGateway ? GATEWAYS[place] : undefined);
+  return id ? getDestination(id) : undefined;
 }
 
 function parseHours(duration: string): number {
@@ -273,7 +300,7 @@ function singleCityActivities(brief: TripBrief, now: () => Date): TravelOffer[] 
 function multiCityHotels(brief: TripBrief, now: () => Date): TravelOffer[] {
   const { retrievedAt, expiresAt } = stamp(now);
   return tripStays(brief).flatMap((stay) => {
-    const catalog = findDestination(`${stay.city} ${stay.country}`);
+    const catalog = localCatalog(stay.city);
     const rooms = brief.travelers > 2 ? Math.ceil(brief.travelers / 2) : 1;
     const options = catalog
       ? catalog.hotels.map((hotel) => ({ id: hotel.id, name: hotel.name, area: hotel.area, nightly: hotel.nightly }))
@@ -303,7 +330,7 @@ function multiCityActivities(brief: TripBrief, now: () => Date): TravelOffer[] {
   const start = Date.parse(brief.travelWindow.startsAt);
   const offers: TravelOffer[] = [];
   for (const stay of tripStays(brief)) {
-    const catalog = findDestination(`${stay.city} ${stay.country}`);
+    const catalog = localCatalog(stay.city);
     for (let day = stay.firstDay; day < stay.firstDay + stay.nights; day++) {
       const dayStart = start + (day - 1) * 24 * hourMs;
       if (catalog) {

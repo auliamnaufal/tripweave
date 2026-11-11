@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchActivities, searchAllOffers, searchFlights, searchHotels } from "./synthetic";
+import { localCatalog, searchActivities, searchAllOffers, searchFlights, searchHotels } from "./synthetic";
 import type { TripBrief } from "@/features/planner/tripBrief";
 import { minorUnits, zonedDateTime } from "@/features/planner/types";
 
@@ -59,6 +59,22 @@ describe("synthetic suppliers", () => {
       expect(Date.parse(offer.startsAt)).toBeGreaterThanOrEqual(Date.parse(lisbon.travelWindow.startsAt));
       expect(Date.parse(offer.endsAt)).toBeLessThanOrEqual(Date.parse(lisbon.travelWindow.endsAt));
     }
+  });
+
+  it("matches the catalog on the city itself, or the city a catalog trip flies into", () => {
+    expect(localCatalog("Lisbon")?.id).toBe("lisbon");
+    expect(localCatalog("Kyoto")?.id).toBe("kyoto");
+    // The UI's Kyoto trip lands in Osaka (flightCity), so a whole trip to Osaka keeps it...
+    expect(localCatalog("Osaka", { viaGateway: true })?.id).toBe("kyoto");
+    // ...but an Osaka stop of a multi-city trip, or Tokyo, or Porto, is not Kyoto or Lisbon.
+    expect(localCatalog("Osaka")).toBeUndefined();
+    expect(localCatalog("Tokyo", { viaGateway: true })).toBeUndefined();
+    expect(localCatalog("Porto", { viaGateway: true })).toBeUndefined();
+  });
+
+  it("gives a Tokyo trip generic fixtures, not Kyoto's", () => {
+    const tokyo: TripBrief = { ...brief, destination: { city: "Tokyo", country: "Japan" } };
+    expect(searchHotels(tokyo, now).map((offer) => offer.id)).toEqual(["hotel-main"]);
   });
 
   it("returns a catalog with unique offer ids", () => {

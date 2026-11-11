@@ -52,6 +52,22 @@ describe("multi-city itinerary", () => {
     expect(fuji).toMatchObject({ title: "Mount Fuji day trip", costMinorUnits: 120 * 2 * 100 });
     expect(fuji?.startsAt.slice(0, 13)).toBe("2026-12-12T08");
   });
+
+  it("never sells a Tokyo or Osaka stop the Kyoto catalog's ryokans and tours", () => {
+    const now = () => new Date("2026-11-10T00:00:00Z");
+    const kyotoCatalog = /Ryokan|Machiya|Celestine|Arashiyama|Fushimi|Gion|Uji/;
+    const offers = [...searchHotels(japan, now), ...searchActivities(japan, now)];
+    expect(offers.length).toBeGreaterThan(0);
+    expect(offers.filter((offer) => kyotoCatalog.test(offer.title)).map((offer) => offer.title)).toEqual([]);
+    const osakaDay = searchActivities(japan, now).filter((offer) => offer.startsAt.startsWith("2026-12-11") && !offer.id.includes("wish"));
+    expect(osakaDay.every((offer) => offer.title.includes("Osaka"))).toBe(true);
+  });
+
+  it("still uses the Kyoto catalog for a stop in Kyoto itself", () => {
+    const now = () => new Date("2026-11-10T00:00:00Z");
+    const viaKyoto = parseTripBrief({ ...japan, stops: [{ city: "Tokyo", country: "Japan", nights: 1 }, { city: "Kyoto", country: "Japan", nights: 2 }] });
+    expect(searchHotels(viaKyoto, now).some((offer) => offer.title === "Ryokan Yachiyo")).toBe(true);
+  });
 });
 
 describe("intake → brief", () => {
