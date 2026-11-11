@@ -1,7 +1,7 @@
 import { buildItinerary } from "@/features/planner/planner";
 import type { TripBrief } from "@/features/planner/tripBrief";
-import { itineraryPlanSchema, type ItineraryPlanView, type TravelOffer } from "@/features/planner/travelOffer";
-import { alternativesFor, type AlternativeSlot } from "@/features/suppliers/alternatives";
+import { itineraryPlanSchema, travelOfferSchema, type ItineraryPlanView, type TravelOffer, type TravelOfferView } from "@/features/planner/travelOffer";
+import { activityOptionsFor, alternativesFor, choicesFor, type AlternativeOption, type AlternativeSlot } from "@/features/suppliers/alternatives";
 import { comparisonsFor, type MarketBenchmark, type ProductComparison } from "@/features/suppliers/compare";
 import { summarizeDeal, type DealSummary } from "@/features/suppliers/deal";
 import type { SourceReport } from "@/features/suppliers/registry";
@@ -19,6 +19,10 @@ export type PlanResult = {
   deal: DealSummary;
   /** Other options for each flight leg and stay, from the same search, for instant swaps. */
   alternatives: AlternativeSlot[];
+  /** Activities that can be added or removed, from the same search. */
+  activityOptions: AlternativeOption[];
+  /** Full offers behind every option above, so the browser can rebuild the plan instantly on a tap. */
+  choices: TravelOfferView[];
   retrievedAt: string;
   quoteId?: string;
 };
@@ -26,7 +30,7 @@ export type PlanResult = {
 /**
  * Turns a selection into everything the planner shows: the deterministic
  * itinerary, the deal summary, the swap options, and a saved quote (with the
- * catalog snapshot) that checkout pays. Used by /api/plan and /api/plan/swap.
+ * catalog snapshot) that checkout pays. Used by /api/plan and /api/plan/edit.
  */
 export async function finalizePlan(input: {
   userId: string | null;
@@ -44,6 +48,8 @@ export async function finalizePlan(input: {
     console.error("plan quote save failed", error);
   }
   const { comparisons, markets, sources } = input.insights;
+  const alternatives = alternativesFor(plan.offers, input.catalog);
+  const activityOptions = activityOptionsFor(plan.offers, input.catalog, input.brief.travelWindow);
   return {
     plan: itineraryPlanSchema.parse(plan),
     note: input.note,
@@ -51,7 +57,9 @@ export async function finalizePlan(input: {
     sources,
     comparisons: comparisonsFor(plan.offers, comparisons),
     deal: summarizeDeal(plan.offers, comparisons, markets, sources),
-    alternatives: alternativesFor(plan.offers, input.catalog),
+    alternatives,
+    activityOptions,
+    choices: choicesFor(alternatives, activityOptions, input.catalog).map((offer) => travelOfferSchema.parse(offer)),
     retrievedAt: new Date().toISOString(),
     ...(quoteId ? { quoteId } : {}),
   };

@@ -3,7 +3,7 @@ import { parseTripBrief, tripBriefSchema } from "./tripBrief";
 import { stayForDay, tripLegs, tripStays } from "./itinerary";
 import { briefFromIntent, intentSchema, type TripIntent } from "@/features/agent/intake";
 import { searchActivities, searchHotels } from "@/features/suppliers/synthetic";
-import { alternativesFor, slotOf, swapOffer } from "@/features/suppliers/alternatives";
+import { activityOptionsFor, alternativesFor, checkEdit, choicesFor, slotOf, swapOffer } from "@/features/suppliers/alternatives";
 import { toTravelOffer, type TravelOffer } from "./travelOffer";
 
 
@@ -152,5 +152,37 @@ describe("instant swaps", () => {
     expect(swapOffer(plan, catalog, "hotel-a", "hotel-c")).toMatchObject({ error: expect.any(String) });
     expect(swapOffer(plan, catalog, "flight-outbound-0", "flight-leg1-0")).toMatchObject({ error: expect.any(String) });
     expect(swapOffer(plan, catalog, "hotel-a", "not-in-search")).toMatchObject({ error: expect.any(String) });
+  });
+});
+
+describe("editing a plan until it's paid", () => {
+  const out0 = offer("flight-outbound-0", "flight", 40000);
+  const out1 = offer("flight-nt-outbound-1", "flight", 35000);
+  const hotelA = offer("hotel-a", "hotel", 30000);
+  const hotelB = offer("hotel-b", "hotel", 25000);
+  const tea = offer("act-tea", "activity", 4000, "2026-12-11T10:00:00Z", "2026-12-11T12:00:00Z");
+  const walk = offer("act-walk", "activity", 0, "2026-12-11T11:00:00Z", "2026-12-11T13:00:00Z");
+  const late = offer("act-late", "activity", 2000, "2027-01-20T10:00:00Z", "2027-01-20T12:00:00Z");
+  const plan = [out0, hotelA, tea];
+  const catalog = [out0, out1, hotelA, hotelB, tea, walk, late];
+  const window = { startsAt: "2026-12-10T00:00:00Z", endsAt: "2026-12-13T23:59:59Z" };
+
+  it("allows swaps within a slot and any set of activities, nothing that changes the trip's shape", () => {
+    expect(checkEdit(plan, [out1, hotelB])).toBeNull();
+    expect(checkEdit(plan, [out0, hotelA, tea, walk])).toBeNull();
+    expect(checkEdit(plan, [out0, tea])).toMatch(/same leg or dates/);
+    expect(checkEdit(plan, [out0, out1, hotelA])).toMatch(/same leg or dates/);
+    expect(checkEdit(plan, [out0, hotelA, tea, tea])).toMatch(/twice/);
+  });
+
+  it("offers the plan's activities plus others inside the trip window, in time order", () => {
+    const options = activityOptionsFor(plan, catalog, window);
+    expect(options.map((o) => o.offerId)).toEqual(["act-tea", "act-walk"]);
+  });
+
+  it("sends full offers for every option, so the browser can rebuild the plan on a tap", () => {
+    const slots = alternativesFor(plan, catalog);
+    const ids = choicesFor(slots, activityOptionsFor(plan, catalog, window), catalog).map((o) => o.id).sort();
+    expect(ids).toEqual(["act-tea", "act-walk", "flight-nt-outbound-1", "flight-outbound-0", "hotel-a", "hotel-b"]);
   });
 });
